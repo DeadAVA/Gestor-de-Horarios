@@ -1,3 +1,4 @@
+import pytest
 from datetime import time
 
 from app.extensions import db
@@ -151,3 +152,109 @@ def test_group_summary_hides_optativas_when_assigned_in_another_group(db):
 
     assert "N25-502" in missing_keys
     assert "N25OD12" not in missing_keys
+
+
+@pytest.mark.parametrize(
+    "group_number, semester, plan_key",
+    [
+        (505, 1, "2025-1"),
+        (506, 1, "2025-1"),
+        (507, 1, "2025-1"),
+        (508, 1, "2025-1"),
+        (509, 1, "2025-1"),
+        (525, 2, "2025-1"),
+        (526, 2, "2025-1"),
+        (527, 2, "2025-1"),
+        (528, 2, "2025-1"),
+        (529, 2, "2025-1"),
+        (535, 3, "2025-1"),
+        (536, 3, "2025-1"),
+        (537, 3, "2025-1"),
+        (538, 3, "2025-1"),
+        (539, 3, "2025-1"),
+        (545, 4, "2025-1"),
+        (546, 4, "2025-1"),
+        (547, 4, "2025-1"),
+        (548, 4, "2025-1"),
+        (549, 4, "2025-1"),
+        (555, 5, "2015-2"),
+        (556, 5, "2015-2"),
+        (557, 5, "2015-2"),
+        (558, 5, "2015-2"),
+        (559, 5, "2015-2"),
+        (565, 6, "2015-2"),
+        (566, 6, "2015-2"),
+        (567, 6, "2015-2"),
+        (568, 6, "2015-2"),
+        (569, 6, "2015-2"),
+        (575, 7, "2015-2"),
+        (576, 7, "2015-2"),
+        (577, 7, "2015-2"),
+        (578, 7, "2015-2"),
+        (579, 7, "2015-2"),
+        (585, 8, "2015-2"),
+        (586, 8, "2015-2"),
+        (587, 8, "2015-2"),
+        (588, 8, "2015-2"),
+        (589, 8, "2015-2"),
+    ],
+)
+def test_manual_groups_x5_to_x9_do_not_report_all_plan_subjects_as_vacancies(db, group_number, semester, plan_key):
+    plan = PlanEstudio(clave=plan_key, nombre=f"Plan {plan_key}")
+    db.session.add(plan)
+    db.session.flush()
+
+    group = Grupo(
+        numero_grupo=group_number,
+        semestre=semester,
+        plan_estudio_id=plan.id,
+        capacidad_alumnos=40,
+        tipo_grupo="normal",
+    )
+    teacher = Docente(
+        clave_docente=f"DOC-{group_number}",
+        nombre=f"Docente Test {group_number}",
+        activo=True,
+    )
+
+    subject_a = Materia(
+        clave="MAN-001",
+        nombre="Materia Manual 1",
+        semestre=semester,
+        plan_estudio_id=plan.id,
+        tipo_materia="normal",
+        etapa="basica" if semester <= 4 else "disciplinaria",
+        modalidad="presencial",
+        activa=True,
+    )
+    subject_b = Materia(
+        clave="MAN-002",
+        nombre="Materia Manual 2",
+        semestre=1 if semester != 1 else 5,
+        plan_estudio_id=plan.id,
+        tipo_materia="normal",
+        etapa="basica" if semester <= 4 else "disciplinaria",
+        modalidad="presencial",
+        activa=True,
+    )
+
+    db.session.add_all([group, teacher, subject_a, subject_b])
+    db.session.flush()
+
+    block = BloqueHorario(
+        grupo_id=group.id,
+        materia_id=subject_a.id,
+        docente_id=teacher.id,
+        dia="lunes",
+        hora_inicio=time(8, 0),
+        hora_fin=time(9, 0),
+        modalidad="presencial",
+    )
+    db.session.add(block)
+    db.session.commit()
+
+    summary = SummaryService.get_group_summary(group.id)
+    missing_keys = {subject["clave"] for subject in summary["materias_sin_docente"]}
+
+    assert "MAN-001" not in missing_keys
+    assert "MAN-002" not in missing_keys

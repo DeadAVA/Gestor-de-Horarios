@@ -4,7 +4,7 @@ No se requiere base de datos, son funciones puras.
 """
 import pytest
 
-from app.services.group_rules import calculate_plan_key, calculate_semester, validate_group_number_for_type
+from app.services.group_rules import calculate_plan_key, calculate_semester, is_manual_selection_group, validate_group_number_for_type
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +80,16 @@ def test_semestre_escolarizado_sufijo_valido_completo():
     # 525 = prefijo 52 (semestre 2), sufijo 5 → válido
     assert calculate_semester(525) == 2
     assert calculate_semester(529) == 2
+
+
+@pytest.mark.parametrize("numero_grupo", [505, 509, 525, 529, 585, 589])
+def test_grupos_x5_a_x9_son_manuales(numero_grupo):
+    assert is_manual_selection_group(numero_grupo, "normal") is True
+
+
+@pytest.mark.parametrize("numero_grupo", [501, 504, 521, 524, 581, 584])
+def test_grupos_fuera_de_x5_a_x9_no_son_manuales(numero_grupo):
+    assert is_manual_selection_group(numero_grupo, "normal") is False
 
 
 def test_validacion_tipo_normal_valida():

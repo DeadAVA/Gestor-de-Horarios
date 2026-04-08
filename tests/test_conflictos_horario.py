@@ -338,6 +338,26 @@ def test_candado_presencial_no_bloquea_modalidad_virtual(seed):
     assert result["modalidad"] == "virtual"
 
 
+def test_candado_no_bloquea_docente_juez(seed, db):
+    teacher = db.session.get(Docente, seed["docente1_id"])
+    teacher.es_juez = True
+    db.session.commit()
+
+    CandadoService.create_lock({
+        "dia": "jueves",
+        "hora_inicio": 18,
+        "hora_fin": 19,
+        "alcance": "presencial",
+    })
+
+    result = HorarioService.create_block(
+        bloque(seed, dia="jueves", hora_inicio="18:00", hora_fin="19:00", modalidad="presencial")
+    )
+
+    assert result["id"] is not None
+    assert result["docente"]["id"] == seed["docente1_id"]
+
+
 def test_candado_ambos_bloquea_virtual_y_presencial(seed):
     CandadoService.create_lock({
         "dia": "martes",

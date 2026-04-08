@@ -2,27 +2,29 @@ from sqlalchemy import and_, func, or_, select
 
 from app.extensions import db
 from app.models import Grupo, Materia, PlanEstudio
-from app.services.group_rules import resolve_group_modality
+from app.services.group_rules import is_manual_selection_group, resolve_group_modality
 
 
-def _resolve_optativa_stage(group: Grupo):
+def _resolve_optativa_stages(group: Grupo) -> list[str]:
     plan_key = group.plan_estudio.clave if getattr(group, "plan_estudio", None) else None
 
-    if plan_key == "2025-2":
+    # En ambos planes de licenciatura las optativas se muestran de forma acumulativa:
+    # disciplinaria incluye basica + disciplinaria; terminal incluye todas.
+    if plan_key in {"2015-2", "2025-2", "2025-1"}:
         if 2 <= group.semestre <= 3:
-            return "basica"
+            return ["basica"]
         if 4 <= group.semestre <= 6:
-            return "disciplinaria"
+            return ["basica", "disciplinaria"]
         if 7 <= group.semestre <= 8:
-            return "terminal"
-        return None
+            return ["basica", "disciplinaria", "terminal"]
+        return []
 
-    # Compatibilidad con logica historica de 2025-1
+    # Fallback conservador para cualquier otro plan.
     if 3 <= group.semestre <= 6:
-        return "disciplinaria"
+        return ["disciplinaria"]
     if 7 <= group.semestre <= 8:
-        return "terminal"
-    return None
+        return ["disciplinaria", "terminal"]
+    return []
 
 
 def _resolve_subject_plan_ids(group: Grupo) -> list[int]:
@@ -87,18 +89,18 @@ def build_valid_subjects_query_for_group(group: Grupo):
         .where(Materia.activa.is_(True))
     )
 
-    # Grupos 505-509: selección libre de materias dentro del plan, sin filtrar por semestre/etapa.
-    if 505 <= int(group.numero_grupo) <= 509:
+    # Grupos manuales x5-x9: selección libre de materias dentro del plan, sin filtrar por semestre/etapa.
+    if is_manual_selection_group(int(group.numero_grupo), group.tipo_grupo):
         return query.order_by(Materia.semestre.asc(), Materia.nombre.asc())
 
-    optativa_stage = _resolve_optativa_stage(group)
-    if optativa_stage:
+    optativa_stages = _resolve_optativa_stages(group)
+    if optativa_stages:
         query = query.where(
             or_(
                 Materia.semestre == group.semestre,
                 and_(
                     Materia.tipo_materia == "optativa",
-                    Materia.etapa == optativa_stage,
+                    Materia.etapa.in_(optativa_stages),
                 ),
             )
         )

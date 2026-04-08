@@ -76,6 +76,18 @@ def resolve_group_modality(numero_grupo: int, tipo_grupo: str) -> str:
     return "normal"
 
 
+def is_manual_selection_group(numero_grupo: int, tipo_grupo: str) -> bool:
+    if resolve_group_modality(numero_grupo, tipo_grupo) != "normal":
+        return False
+
+    try:
+        _calculate_escolarized_semester(numero_grupo)
+    except ValueError:
+        return False
+
+    return numero_grupo % 10 in {5, 6, 7, 8, 9}
+
+
 def get_virtual_group_index(numero_grupo: int, modalidad_grupo: str) -> int | None:
     if modalidad_grupo == "intersemestral" and numero_grupo >= INTERSEMESTRAL_GROUP_START:
         return numero_grupo - INTERSEMESTRAL_GROUP_START + 1

@@ -160,12 +160,14 @@ class HorarioService:
         subject = HorarioService._get_subject_or_404(cleaned_payload["materia_id"])
         teacher = HorarioService._resolve_teacher_for_assignment(cleaned_payload["docente_id"])
         vacancy_assignment = is_vacancy_teacher(teacher)
+        judge_assignment = bool(getattr(teacher, "es_juez", False))
 
         HorarioService._ensure_subject_matches_group(group, subject)
         if not vacancy_assignment:
             HorarioService._ensure_teacher_is_active(teacher)
             HorarioService._ensure_foraneo_virtual_assignment(teacher, cleaned_payload)
-        HorarioService._ensure_not_locked_by_candado(cleaned_payload)
+        if not judge_assignment:
+            HorarioService._ensure_not_locked_by_candado(cleaned_payload)
 
         if not vacancy_assignment:
             conflicting_group_block = HorarioService._find_group_overlap(

@@ -2,6 +2,7 @@ from sqlalchemy import func, select
 
 from app.extensions import db
 from app.models import BloqueHorario, Docente, Grupo, Materia, PlanEstudio
+from app.services.group_rules import is_manual_selection_group, resolve_group_modality
 from app.services.subject_selection import build_valid_subjects_query_for_group
 from app.services.vacancy_teacher import VACANCY_TEACHER_KEY
 from app.utils.exceptions import NotFoundApiError, ValidationApiError
@@ -16,6 +17,33 @@ class SummaryService:
         group = db.session.get(Grupo, group_id)
         if group is None:
             raise NotFoundApiError("Grupo no encontrado", [f"No existe un grupo con id {group_id}"])
+
+        blocks = SummaryService._get_sorted_blocks_for_group(group.id)
+        if SummaryService._is_manual_schedule_group(group):
+            missing_subjects = SummaryService._compute_missing_subjects_for_manual_group(group, blocks)
+            assigned_subject_ids = {
+                block.materia_id
+                for block in blocks
+                if block.docente and block.docente.clave_docente != VACANCY_TEACHER_KEY
+            }
+            vacancy_teacher_ids = SummaryService._get_vacancy_teacher_ids()
+            assigned_teacher_ids = {
+                block.docente_id
+                for block in blocks
+                if block.docente_id not in vacancy_teacher_ids
+            }
+
+            return {
+                "grupo": serialize_group(group),
+                "plan_estudio": serialize_plan(group.plan_estudio),
+                "capacidad": group.capacidad_alumnos,
+                "total_bloques": len(blocks),
+                "total_materias_asignadas": len(assigned_subject_ids),
+                "total_docentes_asignados": len(assigned_teacher_ids),
+                "horas_programadas": calculate_hours_from_blocks(blocks),
+                "materias_sin_docente": [serialize_subject(subject) for subject in missing_subjects],
+                "bloques_horario": [serialize_block(block) for block in blocks],
+            }
 
         valid_subjects = SummaryService._get_valid_subjects_for_group(group)
         vacancy_teacher_ids = SummaryService._get_vacancy_teacher_ids()
@@ -34,7 +62,6 @@ class SummaryService:
             assigned_subject_ids,
             globally_assigned_subject_ids,
         )
-        blocks = SummaryService._get_sorted_blocks_for_group(group.id)
         assigned_teacher_ids = {
             block.docente_id
             for block in blocks
@@ -148,6 +175,34 @@ class SummaryService:
             missing_subjects.append(subject)
 
         return missing_subjects
+
+    @staticmethod
+    def _compute_missing_subjects_for_manual_group(group: Grupo, blocks: list[BloqueHorario]) -> list[Materia]:
+        subject_ids_in_group = {block.materia_id for block in blocks}
+        if not subject_ids_in_group:
+            return []
+
+        subject_ids_with_real_teacher = {
+            block.materia_id
+            for block in blocks
+            if block.docente and block.docente.clave_docente != VACANCY_TEACHER_KEY
+        }
+        missing_subject_ids = subject_ids_in_group - subject_ids_with_real_teacher
+        if not missing_subject_ids:
+            return []
+
+        subjects = db.session.scalars(
+            select(Materia)
+            .where(Materia.id.in_(missing_subject_ids))
+            .order_by(Materia.nombre.asc())
+        ).all()
+        return subjects
+
+    @staticmethod
+    def _is_manual_schedule_group(group: Grupo) -> bool:
+        if resolve_group_modality(group.numero_grupo, group.tipo_grupo) == "maestria":
+            return True
+        return is_manual_selection_group(int(group.numero_grupo), group.tipo_grupo)
 
     @staticmethod
     def _get_globally_assigned_subject_ids(vacancy_teacher_ids: set[int]) -> set[int]:
