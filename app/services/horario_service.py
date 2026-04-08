@@ -78,6 +78,60 @@ class HorarioService:
         return serialize_block(block)
 
     @staticmethod
+    def reassign_subject_teacher(group_id: int, subject_id: int, teacher_id: int) -> dict:
+        group = HorarioService._get_group_or_404(group_id)
+        subject = HorarioService._get_subject_or_404(subject_id)
+        HorarioService._ensure_subject_matches_group(group, subject)
+
+        blocks = db.session.scalars(
+            select(BloqueHorario)
+            .where(BloqueHorario.grupo_id == group.id)
+            .where(BloqueHorario.materia_id == subject.id)
+            .order_by(BloqueHorario.id.asc())
+        ).all()
+
+        if not blocks:
+            return {
+                "group_id": group.id,
+                "materia_id": subject.id,
+                "docente_id": int(teacher_id),
+                "updated_blocks": 0,
+                "bloques": [],
+            }
+
+        for block in blocks:
+            payload = {
+                "group_id": group.id,
+                "materia_id": subject.id,
+                "docente_id": int(teacher_id),
+                "dia": block.dia,
+                "hora_inicio": format_time_value(block.hora_inicio),
+                "hora_fin": format_time_value(block.hora_fin),
+                "modalidad": block.modalidad,
+            }
+
+            validation_result = HorarioService._validate_schedule_rules(
+                payload,
+                exclude_block_id=block.id,
+                enforce_single_teacher_rule=False,
+            )
+
+            block.docente_id = validation_result["teacher"].id
+            db.session.flush()
+
+        db.session.commit()
+
+        refreshed_blocks = HorarioService._get_sorted_group_blocks(group.id)
+        affected_blocks = [b for b in refreshed_blocks if b.materia_id == subject.id]
+        return {
+            "group_id": group.id,
+            "materia_id": subject.id,
+            "docente_id": int(teacher_id),
+            "updated_blocks": len(affected_blocks),
+            "bloques": [serialize_block(block) for block in affected_blocks],
+        }
+
+    @staticmethod
     def validate_block_payload(payload: dict) -> dict:
         validation_result = HorarioService._validate_schedule_rules(payload)
         teacher_hours = validation_result["teacher_current_hours"]
@@ -95,7 +149,11 @@ class HorarioService:
         }
 
     @staticmethod
-    def _validate_schedule_rules(payload: dict, exclude_block_id: int | None = None) -> dict:
+    def _validate_schedule_rules(
+        payload: dict,
+        exclude_block_id: int | None = None,
+        enforce_single_teacher_rule: bool = True,
+    ) -> dict:
         cleaned_payload = validate_schedule_block_payload(payload)
 
         group = HorarioService._get_group_or_404(cleaned_payload["group_id"])
@@ -109,22 +167,23 @@ class HorarioService:
             HorarioService._ensure_foraneo_virtual_assignment(teacher, cleaned_payload)
         HorarioService._ensure_not_locked_by_candado(cleaned_payload)
 
-        conflicting_group_block = HorarioService._find_group_overlap(
-            group.id,
-            cleaned_payload["dia"],
-            cleaned_payload["hora_inicio"],
-            cleaned_payload["hora_fin"],
-            exclude_block_id=exclude_block_id,
-        )
-        if conflicting_group_block is not None:
-            raise ConflictApiError(
-                f"Conflicto con {conflicting_group_block.materia.nombre} - Prof. {conflicting_group_block.docente.nombre}",
-                [
-                    f"El grupo {group.numero_grupo} ya tiene un bloque traslapado en ese horario",
-                    f"Bloque en conflicto: grupo {conflicting_group_block.grupo.numero_grupo}",
-                    f"Horario en conflicto: {HorarioService._format_schedule_range(conflicting_group_block)}",
-                ],
+        if not vacancy_assignment:
+            conflicting_group_block = HorarioService._find_group_overlap(
+                group.id,
+                cleaned_payload["dia"],
+                cleaned_payload["hora_inicio"],
+                cleaned_payload["hora_fin"],
+                exclude_block_id=exclude_block_id,
             )
+            if conflicting_group_block is not None:
+                raise ConflictApiError(
+                    f"Conflicto con {conflicting_group_block.materia.nombre} - Prof. {conflicting_group_block.docente.nombre}",
+                    [
+                        f"El grupo {group.numero_grupo} ya tiene un bloque traslapado en ese horario",
+                        f"Bloque en conflicto: grupo {conflicting_group_block.grupo.numero_grupo}",
+                        f"Horario en conflicto: {HorarioService._format_schedule_range(conflicting_group_block)}",
+                    ],
+                )
 
         if not vacancy_assignment:
             conflicting_teacher_block = HorarioService._find_teacher_overlap(
@@ -144,12 +203,13 @@ class HorarioService:
                     ],
                 )
 
-        HorarioService._ensure_single_teacher_per_subject(
-            group.id,
-            subject.id,
-            teacher.id,
-            exclude_block_id=exclude_block_id,
-        )
+        if not vacancy_assignment and enforce_single_teacher_rule:
+            HorarioService._ensure_single_teacher_per_subject(
+                group.id,
+                subject.id,
+                teacher.id,
+                exclude_block_id=exclude_block_id,
+            )
 
         teacher_current_hours = 0.0
         assignment_hours = calculate_duration_hours(

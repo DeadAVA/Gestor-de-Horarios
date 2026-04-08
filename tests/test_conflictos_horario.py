@@ -11,6 +11,7 @@ from app.services.candado_service import CandadoService
 from app.services.horario_service import HorarioService
 from app.services.summary_service import SummaryService
 from app.utils.exceptions import ConflictApiError, ValidationApiError
+from app.utils.time_utils import calculate_hours_from_blocks
 
 
 # Bloque base reutilizable (lunes 07:00-08:00)
@@ -111,6 +112,65 @@ def test_bloque_vacante_no_cuenta_como_materia_con_docente(seed):
     missing_keys = {subject["clave"] for subject in summary["materias_sin_docente"]}
 
     assert "T1001" in missing_keys
+
+
+def test_bloques_vacantes_permiten_choque_en_mismo_grupo(seed):
+    HorarioService.create_block({
+        **bloque(seed),
+        "docente_id": 0,
+        "hora_inicio": "09:00",
+        "hora_fin": "10:00",
+    })
+
+    result = HorarioService.create_block({
+        **bloque(seed, materia="materia2"),
+        "docente_id": 0,
+        "hora_inicio": "09:00",
+        "hora_fin": "10:00",
+    })
+
+    assert result["id"] is not None
+
+
+def test_reassign_subject_teacher_moves_blocks_and_load(seed, db):
+    HorarioService.create_block(
+        bloque(seed, docente="docente1", dia="lunes", hora_inicio="07:00", hora_fin="08:00")
+    )
+    HorarioService.create_block(
+        bloque(seed, docente="docente1", dia="martes", hora_inicio="07:00", hora_fin="08:00")
+    )
+
+    result = HorarioService.reassign_subject_teacher(
+        seed["grupo1_id"],
+        seed["materia1_id"],
+        seed["docente2_id"],
+    )
+
+    assert result["updated_blocks"] == 2
+    assert all(block["docente"]["id"] == seed["docente2_id"] for block in result["bloques"])
+
+    teacher1 = db.session.get(Docente, seed["docente1_id"])
+    teacher2 = db.session.get(Docente, seed["docente2_id"])
+    assert calculate_hours_from_blocks(teacher1.bloques_horario) == 0
+    assert calculate_hours_from_blocks(teacher2.bloques_horario) == 2
+
+
+def test_reassign_subject_teacher_to_vacante_clears_teacher_load(seed, db):
+    HorarioService.create_block(
+        bloque(seed, docente="docente1", dia="lunes", hora_inicio="07:00", hora_fin="08:00")
+    )
+
+    result = HorarioService.reassign_subject_teacher(
+        seed["grupo1_id"],
+        seed["materia1_id"],
+        0,
+    )
+
+    assert result["updated_blocks"] == 1
+    assert result["bloques"][0]["docente"]["clave_docente"] == "VACANTE-SISTEMA"
+
+    teacher1 = db.session.get(Docente, seed["docente1_id"])
+    assert calculate_hours_from_blocks(teacher1.bloques_horario) == 0
 
 
 # ---------------------------------------------------------------------------

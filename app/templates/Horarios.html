@@ -2856,8 +2856,11 @@
       // Init rowTeachers desde bloques existentes (sin sobrescribir los ya asignados manualmente)
       blocks.forEach(block => {
         const mid = String(block.materia?.id);
-        if (mid && !state.rowTeachers.has(mid)) {
-          state.rowTeachers.set(mid, block.docente?.id);
+        if (mid) {
+          const teacherId = block.docente?.clave_docente === 'VACANTE-SISTEMA'
+            ? VACANCY_TEACHER_ID
+            : block.docente?.id;
+          state.rowTeachers.set(mid, teacherId);
         }
       });
 
@@ -3309,7 +3312,7 @@
       resetScheduleModal();
       setScheduleSubject(materiaId);
       const assignedTeacherId = state.rowTeachers.get(String(materiaId));
-      if (assignedTeacherId) {
+      if (assignedTeacherId !== undefined && assignedTeacherId !== null) {
         setScheduleTeacher(assignedTeacherId);
       }
       setScheduleDay(day);
@@ -3332,7 +3335,10 @@
       document.getElementById('schedule-delete-btn').classList.remove('hidden');
 
       setScheduleSubject(block.materia.id);
-      setScheduleTeacher(block.docente.id);
+      const blockTeacherId = block.docente?.clave_docente === 'VACANTE-SISTEMA'
+        ? VACANCY_TEACHER_ID
+        : block.docente?.id;
+      setScheduleTeacher(blockTeacherId);
       setScheduleDay(block.dia);
       document.getElementById('hora-inicio').value = String(Number(block.hora_inicio.split(':')[0]));
       document.getElementById('hora-fin').value = String(Number(block.hora_fin.split(':')[0]));
@@ -3571,6 +3577,21 @@
         const teacher = state.docentes.find(d => Number(d.id) === Number(teacherId));
         const materiaId = state.pickerTargetMateriaId;
 
+        const subjectBlocks = (state.selectedGroupSchedule?.bloques_horario || [])
+          .filter(block => Number(block.materia?.id) === Number(materiaId));
+
+        if (state.selectedGroupId && subjectBlocks.length) {
+          try {
+            await fetchApi(`/grupos/${state.selectedGroupId}/materias/${materiaId}/docente`, {
+              method: 'PATCH',
+              data: { docente_id: Number(teacherId) },
+            });
+          } catch (error) {
+            showToast(getErrorMessage(error, 'No fue posible reasignar el docente de la materia.'), 'error');
+            return;
+          }
+        }
+
         state.rowTeachers.set(String(materiaId), Number(teacherId));
         state.pickerTargetMateriaId = null;
         document.getElementById('schedule-teacher-picker-modal').classList.add('hidden');
@@ -3589,7 +3610,7 @@
           }
         }
 
-        renderSchedule();
+        await refreshAll({ preserveDraftSchedule: true });
       } else {
         // Contexto formulario: verificar observación y después asignar
         const materiaId = Number(document.getElementById('schedule-materia-id').value);

@@ -33,6 +33,15 @@ def update_schedule_block(block_id: int):
     return success_response("Bloque actualizado correctamente", data)
 
 
+@horarios_bp.patch("/grupos/<int:group_id>/materias/<int:subject_id>/docente")
+def reassign_subject_teacher(group_id: int, subject_id: int):
+    payload = request.get_json(silent=True) or {}
+    if "docente_id" not in payload:
+        payload["docente_id"] = None
+    data = HorarioService.reassign_subject_teacher(group_id, subject_id, payload["docente_id"])
+    return success_response("Docente de materia reasignado correctamente", data)
+
+
 @horarios_bp.post("/horarios/validar")
 def validate_schedule_block():
     payload = request.get_json(silent=True) or {}
