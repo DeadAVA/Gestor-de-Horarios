@@ -1,8 +1,9 @@
 from sqlalchemy import func, select
 
 from app.extensions import db
-from app.models import BloqueHorario, Grupo, Materia, PlanEstudio
+from app.models import BloqueHorario, Docente, Grupo, Materia, PlanEstudio
 from app.services.subject_selection import build_valid_subjects_query_for_group
+from app.services.vacancy_teacher import VACANCY_TEACHER_KEY
 from app.utils.exceptions import NotFoundApiError, ValidationApiError
 from app.utils.parsing import coerce_int
 from app.utils.serializers import serialize_block, serialize_group, serialize_plan, serialize_subject
@@ -17,22 +18,28 @@ class SummaryService:
             raise NotFoundApiError("Grupo no encontrado", [f"No existe un grupo con id {group_id}"])
 
         valid_subjects = SummaryService._get_valid_subjects_for_group(group)
+        vacancy_teacher_ids = SummaryService._get_vacancy_teacher_ids()
         assigned_subject_ids = {
             subject_id
             for subject_id in db.session.scalars(
                 select(BloqueHorario.materia_id)
                 .where(BloqueHorario.grupo_id == group.id)
+                .where(BloqueHorario.docente_id.not_in(vacancy_teacher_ids))
                 .distinct()
             ).all()
         }
-        globally_assigned_subject_ids = SummaryService._get_globally_assigned_subject_ids()
+        globally_assigned_subject_ids = SummaryService._get_globally_assigned_subject_ids(vacancy_teacher_ids)
         missing_subjects = SummaryService._compute_missing_subjects(
             valid_subjects,
             assigned_subject_ids,
             globally_assigned_subject_ids,
         )
         blocks = SummaryService._get_sorted_blocks_for_group(group.id)
-        assigned_teacher_ids = {block.docente_id for block in blocks}
+        assigned_teacher_ids = {
+            block.docente_id
+            for block in blocks
+            if block.docente_id not in vacancy_teacher_ids
+        }
 
         return {
             "grupo": serialize_group(group),
@@ -143,12 +150,25 @@ class SummaryService:
         return missing_subjects
 
     @staticmethod
-    def _get_globally_assigned_subject_ids() -> set[int]:
+    def _get_globally_assigned_subject_ids(vacancy_teacher_ids: set[int]) -> set[int]:
         return {
             subject_id
             for subject_id in db.session.scalars(
-                select(BloqueHorario.materia_id).distinct()
+                select(BloqueHorario.materia_id)
+                .where(BloqueHorario.docente_id.not_in(vacancy_teacher_ids))
+                .distinct()
             ).all()
+        }
+
+    @staticmethod
+    def _get_vacancy_teacher_ids() -> set[int]:
+        return {
+            teacher_id
+            for teacher_id in db.session.scalars(
+                select(Docente.id).where(Docente.clave_docente == VACANCY_TEACHER_KEY)
+                .distinct()
+            ).all()
+            if teacher_id is not None
         }
 
     @staticmethod

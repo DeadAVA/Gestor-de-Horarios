@@ -3,6 +3,7 @@ from sqlalchemy import select
 from app.extensions import db
 from app.models import Docente
 from app.models.horario_juez import HorarioJuez
+from app.services.vacancy_teacher import VACANCY_TEACHER_KEY
 from app.utils.exceptions import ConflictApiError, NotFoundApiError, ValidationApiError
 from app.utils.parsing import coerce_bool
 from app.utils.serializers import serialize_teacher
@@ -18,7 +19,11 @@ MAX_TEACHER_HOURS = 25
 class DocenteService:
     @staticmethod
     def list_teachers(filters) -> list[dict]:
-        query = select(Docente).order_by(Docente.nombre.asc())
+        query = (
+            select(Docente)
+            .where(Docente.clave_docente != VACANCY_TEACHER_KEY)
+            .order_by(Docente.nombre.asc())
+        )
 
         try:
             if filters.get("activo") is not None:
@@ -127,8 +132,8 @@ class DocenteService:
             except (TypeError, ValueError):
                 raise ValidationApiError("Horario de juez inválido", [f"Slot {n}: hora_inicio y hora_fin deben ser enteros"])
 
-            if not (7 <= hora_inicio <= 23):
-                raise ValidationApiError("Horario de juez inválido", [f"Slot {n}: hora_inicio fuera de rango (7-23)"])
+            if not (6 <= hora_inicio <= 23):
+                raise ValidationApiError("Horario de juez inválido", [f"Slot {n}: hora_inicio fuera de rango (6-23)"])
 
             if hora_fin <= hora_inicio or hora_fin > 24:
                 raise ValidationApiError(

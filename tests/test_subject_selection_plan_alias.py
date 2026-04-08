@@ -95,3 +95,61 @@ def test_subject_selection_prefers_group_plan_when_it_has_subjects(db):
 
     assert "OLD-501" in keys
     assert "N25-501" not in keys
+
+
+def test_subject_selection_includes_disciplinary_optativas_for_fourth_semester(db):
+    plan = PlanEstudio(clave="2025-2", nombre="Plan Nuevo")
+    db.session.add(plan)
+    db.session.flush()
+
+    group = Grupo(
+        numero_grupo=541,
+        semestre=4,
+        plan_estudio_id=plan.id,
+        capacidad_alumnos=40,
+        tipo_grupo="normal",
+    )
+    db.session.add(group)
+    db.session.flush()
+
+    mandatory_sem4 = Materia(
+        clave="N25-401",
+        nombre="Materia Obligatoria 4to",
+        semestre=4,
+        plan_estudio_id=plan.id,
+        tipo_materia="normal",
+        etapa="disciplinaria",
+        modalidad="presencial",
+        activa=True,
+    )
+    disciplinary_optativa_other_sem = Materia(
+        clave="N25OD02",
+        nombre="Optativa Disciplinaria",
+        semestre=3,
+        plan_estudio_id=plan.id,
+        tipo_materia="optativa",
+        etapa="disciplinaria",
+        modalidad="presencial",
+        activa=True,
+    )
+    wrong_stage_optativa = Materia(
+        clave="N25OT01",
+        nombre="Optativa Terminal",
+        semestre=7,
+        plan_estudio_id=plan.id,
+        tipo_materia="optativa",
+        etapa="terminal",
+        modalidad="presencial",
+        activa=True,
+    )
+
+    db.session.add_all([mandatory_sem4, disciplinary_optativa_other_sem, wrong_stage_optativa])
+    db.session.commit()
+
+    db.session.refresh(group)
+    subjects = db.session.scalars(build_valid_subjects_query_for_group(group)).all()
+    keys = {subject.clave for subject in subjects}
+
+    assert "N25-401" in keys
+    assert "N25OD02" in keys
+    assert "N25OT01" not in keys

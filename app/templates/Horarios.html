@@ -1004,6 +1004,7 @@
                 Hora inicio
               </label>
               <select id="hora-inicio" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500">
+                <option value="6">6:00</option>
                 <option value="7">7:00</option>
                 <option value="8">8:00</option>
                 <option value="9">9:00</option>
@@ -1028,6 +1029,7 @@
                 Hora fin
               </label>
               <select id="hora-fin" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500">
+                <option value="7">7:00</option>
                 <option value="8">8:00</option>
                 <option value="9">9:00</option>
                 <option value="10">10:00</option>
@@ -1502,9 +1504,10 @@
   </div>
 
   <script id="app-script">
-    const API_BASE_URL = window.API_BASE_URL || 'http://127.0.0.1:5000/api';
+    const API_BASE_URL = window.API_BASE_URL || '/api';
     const DAYS = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-    const TIME_SLOTS = Array.from({ length: 17 }, (_, index) => `${String(index + 7).padStart(2, '0')}:00`);
+    const TIME_SLOTS = Array.from({ length: 18 }, (_, index) => `${String(index + 6).padStart(2, '0')}:00`);
+    const VACANCY_TEACHER_ID = 0;
     const OPTATIVA_SLOTS = {
       '2025-1': { 3: 1, 4: 2, 6: 1, 7: 2, 8: 2 },
       '2015-2': { 2: 3, 3: 2, 4: 2, 5: 2, 6: 1, 7: 2, 8: 3 },
@@ -2595,7 +2598,9 @@
       }
 
       return subjects
-        .filter(subject => Number(subject.semestre) === semester)
+        // El backend ya entrega el conjunto valido para el grupo:
+        // materias del semestre + optativas permitidas por etapa.
+        .filter(subject => Number(subject.semestre) === semester || subject.tipo_materia === 'optativa')
         .sort((a, b) => {
           const typeDiff = String(a.tipo_materia).localeCompare(String(b.tipo_materia));
           if (typeDiff !== 0) {
@@ -2603,6 +2608,42 @@
           }
           return `${a.clave} ${a.nombre}`.localeCompare(`${b.clave} ${b.nombre}`);
         });
+    }
+
+    function preserveDraftScheduleStateForGroup(nextGroupId, nextDetail, nextSchedule) {
+      const currentGroupId = Number(state.selectedGroupId || 0);
+      if (Number(nextGroupId) !== currentGroupId) {
+        return {
+          rowTeachers: new Map(),
+          optativaAssignments: [],
+          customScheduleRows: [],
+        };
+      }
+
+      const validSubjectIds = new Set(
+        (nextDetail?.materias_disponibles || []).map(subject => Number(subject.id))
+      );
+      const assignedOptativaIds = new Set(
+        (nextSchedule?.bloques_horario || [])
+          .filter(block => block?.materia?.tipo_materia === 'optativa')
+          .map(block => Number(block?.materia?.id))
+      );
+
+      const preservedRowTeachers = new Map(
+        Array.from(state.rowTeachers.entries()).filter(([subjectId]) => validSubjectIds.has(Number(subjectId)))
+      );
+      const preservedOptativas = state.optativaAssignments.filter(subjectId => {
+        const sid = Number(subjectId);
+        return validSubjectIds.has(sid) && !assignedOptativaIds.has(sid);
+      });
+      const preservedRows = state.customScheduleRows
+        .filter(row => row.subjectId === null || validSubjectIds.has(Number(row.subjectId)));
+
+      return {
+        rowTeachers: preservedRowTeachers,
+        optativaAssignments: preservedOptativas,
+        customScheduleRows: preservedRows,
+      };
     }
 
     function buildSubjectDayBlocksMap(blocks) {
@@ -2645,9 +2686,12 @@
     function renderSubjectRow(subject, dayBlocks) {
       const isOptativa = subject.tipo_materia === 'optativa';
       const assignedTeacherId = state.rowTeachers.get(String(subject.id));
-      const assignedTeacher = assignedTeacherId
-        ? state.docentes.find(d => Number(d.id) === Number(assignedTeacherId))
-        : null;
+      const isVacancy = Number(assignedTeacherId) === VACANCY_TEACHER_ID;
+      const assignedTeacher = isVacancy
+        ? { nombre: 'Vacante' }
+        : (assignedTeacherId
+            ? state.docentes.find(d => Number(d.id) === Number(assignedTeacherId))
+            : null);
 
       const subjectCell = `
         <td class="py-2 px-4 border-t align-top">
@@ -2712,9 +2756,12 @@
     function renderManualScheduleRow(row, dayBlocks, subjectCandidates) {
       const subject = subjectCandidates.find(item => Number(item.id) === Number(row.subjectId));
       const assignedTeacherId = subject ? state.rowTeachers.get(String(subject.id)) : null;
-      const assignedTeacher = assignedTeacherId
-        ? state.docentes.find(d => Number(d.id) === Number(assignedTeacherId))
-        : null;
+      const isVacancy = Number(assignedTeacherId) === VACANCY_TEACHER_ID;
+      const assignedTeacher = isVacancy
+        ? { nombre: 'Vacante' }
+        : (assignedTeacherId
+            ? state.docentes.find(d => Number(d.id) === Number(assignedTeacherId))
+            : null);
 
       const subjectCell = `
         <td class="py-2 px-4 border-t align-top">
@@ -2884,6 +2931,16 @@
     }
 
     function setScheduleTeacher(teacherId) {
+      if (Number(teacherId) === VACANCY_TEACHER_ID) {
+        document.getElementById('schedule-docente-id').value = String(VACANCY_TEACHER_ID);
+        document.getElementById('schedule-docente-label').textContent = 'Vacante (sin docente asignado)';
+        const viewBtn = document.getElementById('schedule-view-teacher-btn');
+        viewBtn.dataset.teacherId = '';
+        viewBtn.classList.add('hidden');
+        validateScheduleBlock();
+        return;
+      }
+
       const teacher = state.docentes.find(item => Number(item.id) === Number(teacherId));
       if (!teacher) {
         return;
@@ -3037,11 +3094,11 @@
             ${DAYS.map(d => `<option value="${d}" ${slot.dia === d ? 'selected' : ''}>${DAY_LABELS[d]}</option>`).join('')}
           </select>
           <select class="juez-slot-inicio text-xs border border-gray-300 rounded px-1 py-1" data-index="${i}">
-            ${Array.from({length: 17}, (_, k) => k + 7).map(h => `<option value="${h}" ${slot.hora_inicio === h ? 'selected' : ''}>${String(h).padStart(2,'0')}:00</option>`).join('')}
+            ${Array.from({length: 18}, (_, k) => k + 6).map(h => `<option value="${h}" ${slot.hora_inicio === h ? 'selected' : ''}>${String(h).padStart(2,'0')}:00</option>`).join('')}
           </select>
           <span class="text-xs text-gray-500">—</span>
           <select class="juez-slot-fin text-xs border border-gray-300 rounded px-1 py-1" data-index="${i}">
-            ${Array.from({length: 17}, (_, k) => k + 8).map(h => `<option value="${h}" ${slot.hora_fin === h ? 'selected' : ''}>${String(h).padStart(2,'0')}:00</option>`).join('')}
+            ${Array.from({length: 18}, (_, k) => k + 7).map(h => `<option value="${h}" ${slot.hora_fin === h ? 'selected' : ''}>${String(h).padStart(2,'0')}:00</option>`).join('')}
           </select>
           <button type="button" class="ml-auto text-red-500 hover:text-red-700 px-1" onclick="removeJuezSlot(${i})" title="Quitar">
             <i class="fas fa-times"></i>
@@ -3115,8 +3172,21 @@
         ? [...activeTeachers, current]
         : activeTeachers;
 
+      const vacancyOption = {
+        id: VACANCY_TEACHER_ID,
+        clave_docente: 'VACANTE',
+        nombre: 'Vacante',
+        activo: true,
+        foraneo: false,
+        es_juez: false,
+      };
+      const listWithVacancy = [vacancyOption, ...list];
+
       const selectedModality = getSelectedScheduleModality();
-      const filteredByModality = list.filter(docente => {
+      const filteredByModality = listWithVacancy.filter(docente => {
+        if (Number(docente.id) === VACANCY_TEACHER_ID) {
+          return true;
+        }
         if (!docente.foraneo) {
           return true;
         }
@@ -3146,20 +3216,24 @@
 
       tbody.innerHTML = teachers.map(docente => {
         const horas = getTeacherHorasInSchedule(docente.id);
+        const isVacancy = Number(docente.id) === VACANCY_TEACHER_ID;
         const juezTag = docente.es_juez ? ' <span class="text-xs text-amber-700 font-semibold">[Juez]</span>' : '';
         return `
           <tr class="border-t">
             <td class="py-2 px-3 text-sm">${escapeHtml(docente.clave_docente)}</td>
             <td class="py-2 px-3 text-sm">${escapeHtml(docente.nombre)}${juezTag}</td>
-            <td class="py-2 px-3 text-sm text-center">${horas} h</td>
+            <td class="py-2 px-3 text-sm text-center">${isVacancy ? '-' : `${horas} h`}</td>
             <td class="py-2 px-3 text-sm">
               <div class="flex items-center gap-2">
                 <button type="button" class="text-xs text-white bg-green-600 hover:bg-green-700 px-3 py-1 rounded" onclick="window.selectScheduleTeacher(${docente.id})">
                   Asignar
                 </button>
-                <button type="button" class="text-xs text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded" onclick="window.openTeacherAvailability(${docente.id})">
+                ${isVacancy
+                  ? ''
+                  : `<button type="button" class="text-xs text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded" onclick="window.openTeacherAvailability(${docente.id})">
                   Ver horario
-                </button>
+                </button>`
+                }
               </div>
             </td>
           </tr>
@@ -3366,22 +3440,32 @@
       );
     }
 
-    async function loadGroupContext(groupId) {
+    async function loadGroupContext(groupId, options = {}) {
       const [detailResponse, scheduleResponse] = await Promise.all([
         fetchApi(`/grupos/${groupId}`),
         fetchApi(`/grupos/${groupId}/horarios`),
       ]);
+
+      const preserveDrafts = Boolean(options.preserveDrafts);
+      const preserved = preserveDrafts
+        ? preserveDraftScheduleStateForGroup(groupId, detailResponse.data, scheduleResponse.data)
+        : {
+            rowTeachers: new Map(),
+            optativaAssignments: [],
+            customScheduleRows: [],
+          };
+
       state.selectedGroupId = Number(groupId);
       state.selectedGroupDetail = detailResponse.data;
       state.selectedGroupSchedule = scheduleResponse.data;
-      state.rowTeachers = new Map();
-      state.optativaAssignments = [];
-      state.customScheduleRows = [];
+      state.rowTeachers = preserved.rowTeachers;
+      state.optativaAssignments = preserved.optativaAssignments;
+      state.customScheduleRows = preserved.customScheduleRows;
       renderGroupSelector();
       renderSchedule();
     }
 
-    async function refreshAll() {
+    async function refreshAll(options = {}) {
       setBackendStatus('Sincronizando...', 'loading');
       await loadDashboardData();
       await loadHistorial();
@@ -3393,7 +3477,9 @@
       renderCandados();
 
       if (state.selectedGroupId) {
-        await loadGroupContext(state.selectedGroupId);
+        await loadGroupContext(state.selectedGroupId, {
+          preserveDrafts: Boolean(options.preserveDraftSchedule),
+        });
       } else if (state.grupos.length) {
         await loadGroupContext(state.grupos[0].id);
       } else {
@@ -3490,7 +3576,7 @@
         document.getElementById('schedule-teacher-picker-modal').classList.add('hidden');
 
         // Auto-asignación de bloques si el docente es juez y tiene horario predefinido
-        if (teacher?.es_juez && teacher?.horario_juez?.length) {
+        if (teacher && teacher.es_juez && teacher.horario_juez?.length) {
           const slotList = teacher.horario_juez
             .map(s => `${DAY_LABELS[s.dia]} ${String(s.hora_inicio).padStart(2,'0')}:00–${String(s.hora_fin).padStart(2,'0')}:00`)
             .join(', ');
@@ -3507,7 +3593,7 @@
       } else {
         // Contexto formulario: verificar observación y después asignar
         const materiaId = Number(document.getElementById('schedule-materia-id').value);
-        if (materiaId) {
+        if (materiaId && Number(teacherId) !== VACANCY_TEACHER_ID) {
           const proceed = await checkObsWarning(Number(teacherId), materiaId);
           if (!proceed) return;
         }
@@ -4110,7 +4196,7 @@
 
         document.getElementById('add-schedule-modal').classList.add('hidden');
         resetScheduleModal();
-        await refreshAll();
+        await refreshAll({ preserveDraftSchedule: true });
         showToast(isEditing ? 'Bloque de horario actualizado correctamente.' : 'Bloque de horario creado correctamente.');
       } catch (error) {
         showToast(getErrorMessage(error, isEditing ? 'No fue posible actualizar el horario.' : 'No fue posible guardar el horario.'), 'error');
@@ -4483,7 +4569,7 @@
         renderEmptyState('dashboard-docentes-carga-body', 3, 'No se pudo conectar al backend.');
         renderEmptyState('dashboard-docentes-sin-materias-body', 3, 'No se pudo conectar al backend.');
         renderEmptyState('dashboard-docentes-pocas-materias-body', 3, 'No se pudo conectar al backend.');
-        renderEmptyState('grupos-table-body', 6, 'No se pudo conectar al backend. Verifica Flask en http://127.0.0.1:5000');
+        renderEmptyState('grupos-table-body', 6, 'No se pudo conectar al backend. Verifica que el servidor esté corriendo.');
         renderEmptyState('materias-table-body', 8, 'No se pudo conectar al backend.');
         renderEmptyState('docentes-table-body', 6, 'No se pudo conectar al backend.');
         renderEmptyState('schedule-grid-body', 7, 'No se pudo conectar al backend.');

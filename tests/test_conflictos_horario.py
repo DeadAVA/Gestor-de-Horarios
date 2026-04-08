@@ -9,6 +9,7 @@ import pytest
 from app.models import Docente, Materia
 from app.services.candado_service import CandadoService
 from app.services.horario_service import HorarioService
+from app.services.summary_service import SummaryService
 from app.utils.exceptions import ConflictApiError, ValidationApiError
 
 
@@ -88,6 +89,28 @@ def test_no_solapamiento_mismo_grupo_horas_adyacentes(seed):
         bloque(seed, materia="materia2", docente="docente2",
                hora_inicio="09:00", hora_fin="10:00")
     )
+
+
+def test_bloque_vacante_se_permite(seed):
+    result = HorarioService.create_block({
+        **bloque(seed),
+        "docente_id": 0,
+    })
+
+    assert result["id"] is not None
+    assert result["docente"]["clave_docente"] == "VACANTE-SISTEMA"
+
+
+def test_bloque_vacante_no_cuenta_como_materia_con_docente(seed):
+    HorarioService.create_block({
+        **bloque(seed),
+        "docente_id": 0,
+    })
+
+    summary = SummaryService.get_group_summary(seed["grupo1_id"])
+    missing_keys = {subject["clave"] for subject in summary["materias_sin_docente"]}
+
+    assert "T1001" in missing_keys
 
 
 # ---------------------------------------------------------------------------

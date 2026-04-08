@@ -139,6 +139,11 @@ def test_materia_id_faltante():
     assert any("materia_id" in e.lower() for e in exc_info.value.errors)
 
 
+def test_docente_id_cero_valido_para_vacante():
+    result = validate_schedule_block_payload({**PAYLOAD_VALIDO, "docente_id": 0})
+    assert result["docente_id"] == 0
+
+
 def test_multiples_errores_coleccionados():
     """El validador debe reportar todos los errores, no solo el primero."""
     payload = {"group_id": "abc", "dia": "domingo", "hora_inicio": "not-a-time"}

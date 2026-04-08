@@ -5,9 +5,10 @@ from app.models import BloqueHorario, Docente, Grupo, Materia
 from app.services.candado_service import CandadoService
 from app.services.docente_service import MAX_TEACHER_HOURS
 from app.services.subject_selection import build_valid_subjects_query_for_group
+from app.services.vacancy_teacher import get_or_create_vacancy_teacher, is_vacancy_teacher
 from app.utils.exceptions import ConflictApiError, NotFoundApiError, ValidationApiError
 from app.utils.serializers import serialize_block, serialize_group, serialize_plan, serialize_subject, serialize_teacher
-from app.utils.time_utils import calculate_duration_hours, calculate_hours_from_blocks, day_sort_key, format_time_value
+from app.utils.time_utils import END_OF_DAY_SENTINEL, calculate_duration_hours, calculate_hours_from_blocks, day_sort_key, format_time_value
 from app.validators.horario_validator import validate_schedule_block_payload
 
 
@@ -99,11 +100,13 @@ class HorarioService:
 
         group = HorarioService._get_group_or_404(cleaned_payload["group_id"])
         subject = HorarioService._get_subject_or_404(cleaned_payload["materia_id"])
-        teacher = HorarioService._get_teacher_or_404(cleaned_payload["docente_id"])
+        teacher = HorarioService._resolve_teacher_for_assignment(cleaned_payload["docente_id"])
+        vacancy_assignment = is_vacancy_teacher(teacher)
 
         HorarioService._ensure_subject_matches_group(group, subject)
-        HorarioService._ensure_teacher_is_active(teacher)
-        HorarioService._ensure_foraneo_virtual_assignment(teacher, cleaned_payload)
+        if not vacancy_assignment:
+            HorarioService._ensure_teacher_is_active(teacher)
+            HorarioService._ensure_foraneo_virtual_assignment(teacher, cleaned_payload)
         HorarioService._ensure_not_locked_by_candado(cleaned_payload)
 
         conflicting_group_block = HorarioService._find_group_overlap(
@@ -123,22 +126,23 @@ class HorarioService:
                 ],
             )
 
-        conflicting_teacher_block = HorarioService._find_teacher_overlap(
-            teacher.id,
-            cleaned_payload["dia"],
-            cleaned_payload["hora_inicio"],
-            cleaned_payload["hora_fin"],
-            exclude_block_id=exclude_block_id,
-        )
-        if conflicting_teacher_block is not None:
-            raise ConflictApiError(
-                f"Conflicto con {conflicting_teacher_block.materia.nombre} - Prof. {conflicting_teacher_block.docente.nombre}",
-                [
-                    "El docente ya tiene clases simultaneas en otro grupo",
-                    f"Grupo en conflicto: {conflicting_teacher_block.grupo.numero_grupo}",
-                    f"Horario en conflicto: {HorarioService._format_schedule_range(conflicting_teacher_block)}",
-                ],
+        if not vacancy_assignment:
+            conflicting_teacher_block = HorarioService._find_teacher_overlap(
+                teacher.id,
+                cleaned_payload["dia"],
+                cleaned_payload["hora_inicio"],
+                cleaned_payload["hora_fin"],
+                exclude_block_id=exclude_block_id,
             )
+            if conflicting_teacher_block is not None:
+                raise ConflictApiError(
+                    f"Conflicto con {conflicting_teacher_block.materia.nombre} - Prof. {conflicting_teacher_block.docente.nombre}",
+                    [
+                        "El docente ya tiene clases simultaneas en otro grupo",
+                        f"Grupo en conflicto: {conflicting_teacher_block.grupo.numero_grupo}",
+                        f"Horario en conflicto: {HorarioService._format_schedule_range(conflicting_teacher_block)}",
+                    ],
+                )
 
         HorarioService._ensure_single_teacher_per_subject(
             group.id,
@@ -147,29 +151,32 @@ class HorarioService:
             exclude_block_id=exclude_block_id,
         )
 
-        teacher_blocks = teacher.bloques_horario
-        if exclude_block_id is not None:
-            teacher_blocks = [block for block in teacher_blocks if block.id != exclude_block_id]
-
-        teacher_current_hours = calculate_hours_from_blocks(teacher_blocks)
+        teacher_current_hours = 0.0
         assignment_hours = calculate_duration_hours(
             cleaned_payload["hora_inicio"],
             cleaned_payload["hora_fin"],
         )
 
-        if teacher_current_hours >= MAX_TEACHER_HOURS:
-            raise ConflictApiError(
-                "El docente ya alcanzó 25 horas",
-                [f"El docente {teacher.nombre} ya tiene {teacher_current_hours} horas asignadas"],
-            )
+        if not vacancy_assignment:
+            teacher_blocks = teacher.bloques_horario
+            if exclude_block_id is not None:
+                teacher_blocks = [block for block in teacher_blocks if block.id != exclude_block_id]
 
-        if teacher_current_hours + assignment_hours > MAX_TEACHER_HOURS:
-            raise ConflictApiError(
-                "Esta asignación excede el máximo permitido",
-                [
-                    f"El docente {teacher.nombre} sumaria {round(teacher_current_hours + assignment_hours, 2)} horas",
-                ],
-            )
+            teacher_current_hours = calculate_hours_from_blocks(teacher_blocks)
+
+            if teacher_current_hours >= MAX_TEACHER_HOURS:
+                raise ConflictApiError(
+                    "El docente ya alcanzó 25 horas",
+                    [f"El docente {teacher.nombre} ya tiene {teacher_current_hours} horas asignadas"],
+                )
+
+            if teacher_current_hours + assignment_hours > MAX_TEACHER_HOURS:
+                raise ConflictApiError(
+                    "Esta asignación excede el máximo permitido",
+                    [
+                        f"El docente {teacher.nombre} sumaria {round(teacher_current_hours + assignment_hours, 2)} horas",
+                    ],
+                )
 
         return {
             "payload": cleaned_payload,
@@ -183,7 +190,7 @@ class HorarioService:
     @staticmethod
     def _ensure_not_locked_by_candado(cleaned_payload: dict) -> None:
         start_hour = int(cleaned_payload["hora_inicio"].hour)
-        end_hour = int(cleaned_payload["hora_fin"].hour)
+        end_hour = 24 if cleaned_payload["hora_fin"] == END_OF_DAY_SENTINEL else int(cleaned_payload["hora_fin"].hour)
         conflict = CandadoService.find_conflicting_lock(
             cleaned_payload["dia"],
             start_hour,
@@ -233,6 +240,12 @@ class HorarioService:
         if teacher is None:
             raise NotFoundApiError("Docente no encontrado", [f"No existe un docente con id {teacher_id}"])
         return teacher
+
+    @staticmethod
+    def _resolve_teacher_for_assignment(teacher_id: int) -> Docente:
+        if int(teacher_id) == 0:
+            return get_or_create_vacancy_teacher()
+        return HorarioService._get_teacher_or_404(teacher_id)
 
     @staticmethod
     def _ensure_subject_matches_group(group: Grupo, subject: Materia) -> None:
