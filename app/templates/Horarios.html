@@ -284,7 +284,7 @@
             <h2 class="text-2xl font-bold">Dashboard</h2>
           </div>
           
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
             <div class="card bg-white p-6 rounded-lg shadow">
               <div class="flex justify-between items-center mb-4">
                 <h3 class="text-lg font-semibold">Total de Grupos</h3>
@@ -310,6 +310,15 @@
               </div>
               <p class="text-3xl font-bold" id="dashboard-materias-sin-docente">0</p>
               <p class="text-sm text-gray-600 mt-2">Pendientes en todos los grupos · clic para ver vacantes</p>
+            </button>
+
+            <button id="dashboard-vacancy-subjects-card" class="card bg-white p-6 rounded-lg shadow text-left hover:shadow-md transition-shadow w-full">
+              <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold">Materias con vacante</h3>
+                <i class="fas fa-triangle-exclamation text-red-500 text-2xl"></i>
+              </div>
+              <p class="text-3xl font-bold text-red-600" id="dashboard-materias-vacantes">0</p>
+              <p class="text-sm text-gray-600 mt-2">Con docente vacante asignado · clic para ver</p>
             </button>
           </div>
           
@@ -1005,21 +1014,41 @@
             <i class="fas fa-times"></i>
           </button>
         </div>
-        <div class="overflow-x-auto max-h-[70vh]">
-          <table class="min-w-full">
-            <thead>
-              <tr class="bg-gray-50">
-                <th class="py-3 px-4 text-left">Grupo</th>
-                <th class="py-3 px-4 text-left">Semestre</th>
-                <th class="py-3 px-4 text-left">Plan</th>
-                <th class="py-3 px-4 text-left">Clave</th>
-                <th class="py-3 px-4 text-left">Materia</th>
-                <th class="py-3 px-4 text-left">Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="missing-subjects-table-body"></tbody>
-          </table>
-        </div>
+          <div class="flex border-b mb-4">
+            <button id="missing-tab-sin-asignar" class="px-4 py-2 tab-active font-medium text-sm">Sin asignar</button>
+            <button id="missing-tab-vacantes" class="px-4 py-2 text-gray-600 font-medium text-sm">Con docente vacante</button>
+          </div>
+          <div id="missing-panel-sin-asignar" class="overflow-x-auto max-h-[65vh]">
+            <table class="min-w-full">
+              <thead>
+                <tr class="bg-gray-50">
+                  <th class="py-3 px-4 text-left">Grupo</th>
+                  <th class="py-3 px-4 text-left">Semestre</th>
+                  <th class="py-3 px-4 text-left">Plan</th>
+                  <th class="py-3 px-4 text-left">Clave</th>
+                  <th class="py-3 px-4 text-left">Materia</th>
+                  <th class="py-3 px-4 text-left">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="missing-subjects-table-body"></tbody>
+            </table>
+          </div>
+          <div id="missing-panel-vacantes" class="overflow-x-auto max-h-[65vh] hidden">
+            <table class="min-w-full">
+              <thead>
+                <tr class="bg-gray-50">
+                  <th class="py-3 px-4 text-left">Grupo</th>
+                  <th class="py-3 px-4 text-left">Semestre</th>
+                  <th class="py-3 px-4 text-left">Plan</th>
+                  <th class="py-3 px-4 text-left">Clave</th>
+                  <th class="py-3 px-4 text-left">Materia</th>
+                  <th class="py-3 px-4 text-left">Día / Hora</th>
+                  <th class="py-3 px-4 text-left">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="vacancy-subjects-table-body"></tbody>
+            </table>
+          </div>
       </div>
     </div>
   </div>
@@ -2249,6 +2278,11 @@
       const activeTeachers = state.docentes.filter(docente => docente.activo);
       const saturatedTeachers = state.docentes.filter(docente => Number(docente.horas_acumuladas || 0) >= 25);
       const missingSubjectsCount = state.summaries.reduce((acc, item) => acc + item.materias_sin_docente.length, 0);
+      const vacancySubjectsCount = state.summaries.reduce((acc, item) => {
+        const vacancyBlocks = (item.bloques_horario || []).filter(b => b.docente?.clave_docente === 'VACANTE-SISTEMA');
+        const uniqueMaterias = new Set(vacancyBlocks.map(b => `${item.grupo?.id}-${b.materia?.id}`));
+        return acc + uniqueMaterias.size;
+      }, 0);
       const teacherSubjectsMap = new Map();
 
       state.summaries.forEach(summary => {
@@ -2271,6 +2305,7 @@
       document.getElementById('dashboard-docentes-saturados').textContent = saturatedTeachers.length;
       document.getElementById('dashboard-docentes-total').textContent = `De ${activeTeachers.length} docentes activos`;
       document.getElementById('dashboard-materias-sin-docente').textContent = missingSubjectsCount;
+      document.getElementById('dashboard-materias-vacantes').textContent = vacancySubjectsCount;
 
       const pendingBody = document.getElementById('dashboard-grupos-pendientes-body');
       const pendingRows = [...state.summaries]
@@ -2567,6 +2602,9 @@
             <td class="py-4 px-4">${assignmentType}<div class="mt-1">${teacherTypeBadge}${juezBadge}</div></td>
             <td class="py-4 px-4">${docente.activo ? 'Sí' : 'No'}</td>
             <td class="py-4 px-4">
+              <button class="text-blue-600 hover:text-blue-800 mr-3" onclick="window.openTeacherAvailability(${docente.id})" title="Ver horario del docente">
+                <i class="fas fa-calendar-week mr-1"></i> Ver horario
+              </button>
               <button class="text-amber-600 hover:text-amber-800 mr-3" onclick="window.editTeacher(${docente.id})">
                 <i class="fas fa-edit mr-1"></i> Editar
               </button>
@@ -2723,8 +2761,8 @@
               <i class="fas fa-edit mr-1"></i> Editar
             </button>
             <button class="text-red-600 hover:text-red-800" onclick="window.deleteCandado(${candado.id})">
-              <i class="fas fa-trash-alt mr-1"></i> Eliminar
-            </button>
+                <i class="fas fa-trash-alt mr-1"></i> Eliminar
+              </button>
           </td>
         </tr>
       `).join('');
@@ -4402,29 +4440,87 @@
       );
     }
 
-    function renderMissingSubjectsModal() {
-      const rows = getMissingSubjectsRows();
-      const tbody = document.getElementById('missing-subjects-table-body');
+    function getVacancySubjectsRows() {
+      return state.summaries.flatMap(summary =>
+        (summary.bloques_horario || [])
+          .filter(block => block.docente?.clave_docente === 'VACANTE-SISTEMA')
+          .map(block => ({ grupo: summary.grupo, block }))
+      );
+    }
 
-      if (!rows.length) {
-        renderEmptyState('missing-subjects-table-body', 6, 'No hay materias vacantes.');
-        return;
+    function renderMissingSubjectsModal(activeTab) {
+      const tab = activeTab || 'sin-asignar';
+
+      const tabSinAsignar = document.getElementById('missing-tab-sin-asignar');
+      const tabVacantes = document.getElementById('missing-tab-vacantes');
+      const panelSinAsignar = document.getElementById('missing-panel-sin-asignar');
+      const panelVacantes = document.getElementById('missing-panel-vacantes');
+
+      if (tab === 'vacantes') {
+        tabSinAsignar.classList.remove('tab-active');
+        tabSinAsignar.classList.add('text-gray-600');
+        tabVacantes.classList.add('tab-active');
+        tabVacantes.classList.remove('text-gray-600');
+        panelSinAsignar.classList.add('hidden');
+        panelVacantes.classList.remove('hidden');
+      } else {
+        tabVacantes.classList.remove('tab-active');
+        tabVacantes.classList.add('text-gray-600');
+        tabSinAsignar.classList.add('tab-active');
+        tabSinAsignar.classList.remove('text-gray-600');
+        panelVacantes.classList.add('hidden');
+        panelSinAsignar.classList.remove('hidden');
       }
 
-      tbody.innerHTML = rows.map(item => `
-        <tr class="border-t hover:bg-gray-50">
-          <td class="py-3 px-4">${getGroupDisplayName(item.grupo)}</td>
-          <td class="py-3 px-4">${item.grupo.semestre}</td>
-          <td class="py-3 px-4">${displayPlanKey(item.grupo.plan_estudio.clave)}</td>
-          <td class="py-3 px-4">${item.materia.clave}</td>
-          <td class="py-3 px-4">${item.materia.nombre}</td>
-          <td class="py-3 px-4">
-            <button class="text-blue-600 hover:text-blue-800" onclick="window.openGroupVacancySchedule(${item.grupo.id})">
-              <i class="fas fa-calendar-week mr-1"></i> Abrir horario
-            </button>
-          </td>
-        </tr>
-      `).join('');
+      const rows = getMissingSubjectsRows();
+      const tbody = document.getElementById('missing-subjects-table-body');
+      if (!rows.length) {
+        renderEmptyState('missing-subjects-table-body', 6, 'No hay materias sin asignar.');
+      } else {
+        tbody.innerHTML = rows.map(item => `
+          <tr class="border-t hover:bg-gray-50">
+            <td class="py-3 px-4">${getGroupDisplayName(item.grupo)}</td>
+            <td class="py-3 px-4">${item.grupo.semestre}</td>
+            <td class="py-3 px-4">${displayPlanKey(item.grupo.plan_estudio.clave)}</td>
+            <td class="py-3 px-4">${item.materia.clave}</td>
+            <td class="py-3 px-4">${item.materia.nombre}</td>
+            <td class="py-3 px-4">
+              <button class="text-blue-600 hover:text-blue-800" onclick="window.openGroupVacancySchedule(${item.grupo.id})">
+                <i class="fas fa-calendar-week mr-1"></i> Abrir horario
+              </button>
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      const vacancyRows = getVacancySubjectsRows();
+      const vacancyTbody = document.getElementById('vacancy-subjects-table-body');
+      if (!vacancyRows.length) {
+        renderEmptyState('vacancy-subjects-table-body', 7, 'No hay materias con docente vacante.');
+      } else {
+        const DAY_MAP = { lunes: 'Lun', martes: 'Mar', miercoles: 'Miér', jueves: 'Jue', viernes: 'Vie', sabado: 'Sáb' };
+        vacancyTbody.innerHTML = vacancyRows.map(item => {
+          const dayLabel = DAY_MAP[item.block.dia] || item.block.dia || '—';
+          const hourLabel = item.block.hora_inicio && item.block.hora_fin
+            ? `${item.block.hora_inicio} - ${item.block.hora_fin}`
+            : '—';
+          return `
+            <tr class="border-t hover:bg-red-50">
+              <td class="py-3 px-4">${getGroupDisplayName(item.grupo)}</td>
+              <td class="py-3 px-4">${item.grupo.semestre}</td>
+              <td class="py-3 px-4">${displayPlanKey(item.grupo.plan_estudio.clave)}</td>
+              <td class="py-3 px-4">${item.block.materia?.clave || '—'}</td>
+              <td class="py-3 px-4 text-red-700 font-medium"><i class="fas fa-triangle-exclamation mr-1"></i>${escapeHtml(item.block.materia?.nombre || '—')}</td>
+              <td class="py-3 px-4 text-sm text-gray-600">${dayLabel} ${hourLabel}</td>
+              <td class="py-3 px-4">
+                <button class="text-blue-600 hover:text-blue-800" onclick="window.openGroupVacancySchedule(${item.grupo.id})">
+                  <i class="fas fa-calendar-week mr-1"></i> Abrir horario
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      }
     }
 
     async function downloadAllExports(format) {
@@ -4843,11 +4939,21 @@
     document.getElementById('subjects-tab-2015-2').addEventListener('click', () => setSubjectPlanTab('2015-2'));
     document.getElementById('subjects-tab-maestria').addEventListener('click', () => setSubjectPlanTab('maestria'));
     document.getElementById('dashboard-missing-subjects-card').addEventListener('click', () => {
-      renderMissingSubjectsModal();
+      renderMissingSubjectsModal('sin-asignar');
       document.getElementById('missing-subjects-modal').classList.remove('hidden');
     });
     document.getElementById('missing-subjects-close-btn').addEventListener('click', () => {
       document.getElementById('missing-subjects-modal').classList.add('hidden');
+    });
+    document.getElementById('dashboard-vacancy-subjects-card').addEventListener('click', () => {
+      renderMissingSubjectsModal('vacantes');
+      document.getElementById('missing-subjects-modal').classList.remove('hidden');
+    });
+    document.getElementById('missing-tab-sin-asignar').addEventListener('click', () => {
+      renderMissingSubjectsModal('sin-asignar');
+    });
+    document.getElementById('missing-tab-vacantes').addEventListener('click', () => {
+      renderMissingSubjectsModal('vacantes');
     });
 
     document.getElementById('subject-filter-query').addEventListener('input', function() {
