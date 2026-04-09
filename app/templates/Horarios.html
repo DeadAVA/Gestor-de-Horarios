@@ -1670,9 +1670,12 @@
       scheduleSubjectSearch: '',
       scheduleSubjectTypeFilter: 'all',
       rowTeachers: new Map(),
+      vacancyVisualOverrides: new Set(),
       pickerTargetMateriaId: null,
       optativaAssignments: [],
+      optativaCatalogCache: new Map(),
       pickerTargetSlotIndex: null,
+      pickerTargetOptativaSubjectId: null,
       pickerTargetCustomRowId: null,
       pickerAllowAllSubjects: false,
       customScheduleRows: [],
@@ -2599,6 +2602,15 @@
       return MODALITY_MAP[document.getElementById('virtual').value] || 'presencial';
     }
 
+    function isSelectedScheduleTeacherJudge() {
+      const teacherId = Number(document.getElementById('schedule-docente-id').value || 0);
+      if (!teacherId || teacherId === VACANCY_TEACHER_ID) {
+        return false;
+      }
+      const teacher = state.docentes.find(item => Number(item.id) === teacherId);
+      return Boolean(teacher?.es_juez);
+    }
+
     function candadoAppliesToModality(candado, modalidad) {
       return candado.alcance === 'ambos' || candado.alcance === modalidad;
     }
@@ -2630,6 +2642,17 @@
       const modalidad = getSelectedScheduleModality();
       const startSelect = document.getElementById('hora-inicio');
       const endSelect = document.getElementById('hora-fin');
+
+      if (isSelectedScheduleTeacherJudge()) {
+        Array.from(startSelect.options).forEach(option => {
+          option.disabled = false;
+        });
+        Array.from(endSelect.options).forEach(option => {
+          option.disabled = false;
+        });
+        return;
+      }
+
       const blockedStarts = new Set(getDayCandados(day, modalidad).map(slot => Number(slot.hora_inicio)));
       const blockedEnds = new Set(getDayCandados(day, modalidad).map(slot => Number(slot.hora_fin)));
 
@@ -2748,7 +2771,9 @@
       if (Number(nextGroupId) !== currentGroupId) {
         return {
           rowTeachers: new Map(),
+          vacancyVisualOverrides: new Set(),
           optativaAssignments: [],
+          optativaCatalogCache: new Map(),
           customScheduleRows: [],
           scheduleObservations: new Map(),
         };
@@ -2771,14 +2796,35 @@
       const preservedRowTeachers = new Map(
         Array.from(state.rowTeachers.entries()).filter(([subjectId]) => validSubjectIds.has(Number(subjectId)))
       );
+      const preservedVacancyVisualOverrides = new Set(
+        Array.from(state.vacancyVisualOverrides.values()).filter(subjectId => validSubjectIds.has(Number(subjectId)))
+      );
       const preservedOptativas = state.optativaAssignments.filter(subjectId => {
         const sid = Number(subjectId);
-        return validSubjectIds.has(sid) && !assignedOptativaIds.has(sid);
+        return !assignedOptativaIds.has(sid);
       });
       const restoredOptativas = Array.from(previouslyAssignedOptativaIds).filter(subjectId => (
-        validSubjectIds.has(subjectId) && !assignedOptativaIds.has(subjectId)
+        !assignedOptativaIds.has(subjectId)
       ));
       const mergedOptativas = [...new Set([...preservedOptativas.map(Number), ...restoredOptativas])];
+      const mergedOptativaSet = new Set(mergedOptativas.map(Number));
+
+      const preservedOptativaCatalogCache = new Map(
+        Array.from(state.optativaCatalogCache.entries()).filter(([subjectId]) => (
+          mergedOptativaSet.has(Number(subjectId)) || previouslyAssignedOptativaIds.has(Number(subjectId))
+        ))
+      );
+
+      const localOptativas = [
+        ...(state.selectedGroupDetail?.materias_disponibles || []),
+        ...(nextDetail?.materias_disponibles || []),
+      ].filter(subject => subject?.tipo_materia === 'optativa');
+      localOptativas.forEach(subject => {
+        const sid = Number(subject.id);
+        if (mergedOptativaSet.has(sid) || assignedOptativaIds.has(sid) || previouslyAssignedOptativaIds.has(sid)) {
+          preservedOptativaCatalogCache.set(sid, subject);
+        }
+      });
       const preservedRows = state.customScheduleRows
         .filter(row => row.subjectId === null || validSubjectIds.has(Number(row.subjectId)));
       const preservedRowObservationKeys = new Set(preservedRows.map(row => `row:${row.rowId}`));
@@ -2797,10 +2843,28 @@
 
       return {
         rowTeachers: preservedRowTeachers,
+        vacancyVisualOverrides: preservedVacancyVisualOverrides,
         optativaAssignments: mergedOptativas,
+        optativaCatalogCache: preservedOptativaCatalogCache,
         customScheduleRows: preservedRows,
         scheduleObservations: preservedObservations,
       };
+    }
+
+    function rememberOptativaSubject(subjectId) {
+      const sid = Number(subjectId);
+      if (!sid) {
+        return;
+      }
+
+      const source = [
+        ...(state.selectedGroupDetail?.materias_disponibles || []),
+        ...state.materias,
+      ].find(subject => Number(subject?.id) === sid && subject?.tipo_materia === 'optativa');
+
+      if (source) {
+        state.optativaCatalogCache.set(sid, source);
+      }
     }
 
     function buildSubjectDayBlocksMap(blocks) {
@@ -2945,8 +3009,15 @@
 
     function renderSubjectRow(subject, dayBlocks) {
       const isOptativa = subject.tipo_materia === 'optativa';
+      const hasScheduledBlocks = isOptativa && DAYS.some(day => {
+        const key = `${subject.id}:${day}`;
+        return (dayBlocks.get(key) || []).length > 0;
+      });
       const assignedTeacherId = state.rowTeachers.get(String(subject.id));
       const isVacancy = Number(assignedTeacherId) === VACANCY_TEACHER_ID;
+      const hideVacancyBadge = isVacancy && state.vacancyVisualOverrides.has(Number(subject.id));
+      const hasRealTeacher = assignedTeacherId !== undefined && assignedTeacherId !== null && !isVacancy;
+      const hasTeacherAssignment = assignedTeacherId !== undefined && assignedTeacherId !== null;
       const assignedTeacher = isVacancy
         ? { nombre: 'Vacante' }
         : (assignedTeacherId
@@ -2954,16 +3025,33 @@
             : null);
 
       const subjectCell = `
-        <td class="py-2 px-4 border-t align-top">
-          <p class="font-medium text-sm">${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
+        <td class="py-2 px-4 border-t align-top ${isVacancy && !hideVacancyBadge ? 'bg-red-50/70' : ''}">
+          <p class="font-medium text-sm ${isVacancy && !hideVacancyBadge ? 'text-red-700' : ''}">${isVacancy && !hideVacancyBadge ? '<i class="fas fa-triangle-exclamation mr-1" title="Materia en vacante"></i>' : ''}${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
           <p class="text-xs text-gray-500 mt-1">${isOptativa ? `Optativa · Etapa ${formatSubjectStage(subject.etapa)}` : 'Obligatoria'}</p>
           ${assignedTeacher
-            ? `<p class="text-xs text-blue-700 mt-1 truncate max-w-[180px]" title="${escapeHtml(assignedTeacher.nombre)}">${escapeHtml(assignedTeacher.nombre)}</p>`
+            ? `<p class="text-xs ${isVacancy && !hideVacancyBadge ? 'text-red-700 font-semibold' : (isVacancy ? 'text-gray-400' : 'text-blue-700')} mt-1 truncate max-w-[180px]" title="${escapeHtml(assignedTeacher.nombre)}">${isVacancy ? (hideVacancyBadge ? 'Sin docente' : 'Vacante (sin docente)') : escapeHtml(assignedTeacher.nombre)}</p>`
             : '<p class="text-xs text-gray-400 mt-1">Sin docente</p>'
           }
-          <button type="button" class="row-assign-teacher-btn mt-1 text-xs text-white bg-green-600 hover:bg-green-700 px-2 py-1 rounded" data-materia-id="${subject.id}">
-            ${assignedTeacher ? 'Cambiar docente' : 'Asignar docente'}
-          </button>
+          <div class="flex flex-wrap gap-1 mt-1">
+            <button type="button" class="row-assign-teacher-btn text-xs text-white bg-green-600 hover:bg-green-700 px-2 py-1 rounded" data-materia-id="${subject.id}">
+              ${hasRealTeacher ? 'Cambiar docente' : 'Asignar docente'}
+            </button>
+            ${hasTeacherAssignment
+              ? `<button type="button" class="row-remove-teacher-btn text-xs text-white bg-gray-500 hover:bg-gray-600 px-2 py-1 rounded" data-materia-id="${subject.id}">
+                   Quitar docente
+                 </button>`
+              : ''
+            }
+            ${isOptativa
+              ? `<button type="button" class="row-change-optativa-btn text-xs text-white bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded" data-subject-id="${subject.id}" data-has-blocks="${hasScheduledBlocks ? '1' : '0'}">
+                   Cambiar materia
+                 </button>
+                 <button type="button" class="row-remove-optativa-btn text-xs text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded" data-subject-id="${subject.id}" data-has-blocks="${hasScheduledBlocks ? '1' : '0'}">
+                   Quitar materia
+                 </button>`
+              : ''
+            }
+          </div>
         </td>
       `;
 
@@ -3013,10 +3101,110 @@
       return `<tr>${subjectCell}${dayCells}</tr>`;
     }
 
+    function getSubjectBlocksFromCurrentSchedule(subjectId) {
+      const sid = Number(subjectId);
+      return (state.selectedGroupSchedule?.bloques_horario || [])
+        .filter(block => Number(block.materia?.id) === sid);
+    }
+
+    function openOptativaReplacePicker(subjectId) {
+      state.pickerTargetCustomRowId = null;
+      state.pickerAllowAllSubjects = false;
+      state.pickerTargetSlotIndex = 0;
+      state.pickerTargetOptativaSubjectId = Number(subjectId);
+      state.scheduleSubjectSearch = '';
+      state.scheduleSubjectTypeFilter = 'all';
+      document.getElementById('schedule-subject-search').value = '';
+      document.getElementById('schedule-subject-type').value = 'all';
+      renderScheduleSubjectPicker();
+      document.getElementById('schedule-subject-picker-modal').classList.remove('hidden');
+    }
+
+    async function removeOptativaSelection(subjectId) {
+      const sid = Number(subjectId);
+      if (!sid) {
+        return;
+      }
+
+      const blocks = getSubjectBlocksFromCurrentSchedule(sid);
+      if (blocks.length) {
+        const confirmed = window.confirm('Esta optativa ya tiene horarios capturados. Si la quitas, también se eliminarán esos bloques. ¿Deseas continuar?');
+        if (!confirmed) {
+          return;
+        }
+
+        try {
+          for (const block of blocks) {
+            await fetchApi(`/horarios/bloques/${block.id}`, { method: 'DELETE' });
+          }
+        } catch (error) {
+          showToast(getErrorMessage(error, 'No fue posible quitar la optativa porque no se pudieron eliminar sus bloques.'), 'error');
+          return;
+        }
+      }
+
+      state.optativaAssignments = state.optativaAssignments
+        .filter(assignmentId => Number(assignmentId) !== sid);
+      state.rowTeachers.delete(String(sid));
+      state.vacancyVisualOverrides.delete(sid);
+
+      if (blocks.length) {
+        await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
+      } else {
+        renderSchedule();
+      }
+
+      showToast('Optativa actualizada correctamente.', 'success');
+    }
+
+    async function removeRowTeacherAssignment(materiaId) {
+      const mid = Number(materiaId);
+      if (!mid) {
+        return;
+      }
+
+      const keepAsBlank = window.confirm('¿Deseas dejar esta materia en blanco (Sin docente) para trabajarla después?\n\nAceptar: se mostrará Sin docente.\nCancelar: se mostrará como Vacante.');
+
+      if (keepAsBlank) {
+        state.vacancyVisualOverrides.add(mid);
+      } else {
+        state.vacancyVisualOverrides.delete(mid);
+      }
+
+      const blocks = getSubjectBlocksFromCurrentSchedule(mid);
+      if (state.selectedGroupId && blocks.length) {
+        try {
+          await fetchApi(`/grupos/${state.selectedGroupId}/materias/${mid}/docente`, {
+            method: 'PATCH',
+            data: { docente_id: VACANCY_TEACHER_ID },
+          });
+          state.rowTeachers.set(String(mid), VACANCY_TEACHER_ID);
+          await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
+        } catch (error) {
+          showToast(getErrorMessage(error, 'No fue posible quitar el docente de esta materia.'), 'error');
+          return;
+        }
+
+        showToast(keepAsBlank
+          ? 'Docente quitado correctamente. La materia se dejó en blanco para trabajarla después.'
+          : 'Docente quitado correctamente. Se asignó como vacante en los bloques existentes.', 'success');
+        return;
+      }
+
+      state.rowTeachers.delete(String(mid));
+      renderSchedule();
+      showToast(keepAsBlank
+        ? 'Docente quitado correctamente. La materia se dejó en blanco para trabajarla después.'
+        : 'Docente quitado correctamente.', 'success');
+    }
+
     function renderManualScheduleRow(row, dayBlocks, subjectCandidates) {
       const subject = subjectCandidates.find(item => Number(item.id) === Number(row.subjectId));
       const assignedTeacherId = subject ? state.rowTeachers.get(String(subject.id)) : null;
       const isVacancy = Number(assignedTeacherId) === VACANCY_TEACHER_ID;
+      const hideVacancyBadge = isVacancy && subject && state.vacancyVisualOverrides.has(Number(subject.id));
+      const hasRealTeacher = assignedTeacherId !== undefined && assignedTeacherId !== null && !isVacancy;
+      const hasTeacherAssignment = assignedTeacherId !== undefined && assignedTeacherId !== null;
       const assignedTeacher = isVacancy
         ? { nombre: 'Vacante' }
         : (assignedTeacherId
@@ -3024,15 +3212,15 @@
             : null);
 
       const subjectCell = `
-        <td class="py-2 px-4 border-t align-top">
+        <td class="py-2 px-4 border-t align-top ${isVacancy && !hideVacancyBadge ? 'bg-red-50/70' : ''}">
           ${subject
-            ? `<p class="font-medium text-sm">${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
+            ? `<p class="font-medium text-sm ${isVacancy && !hideVacancyBadge ? 'text-red-700' : ''}">${isVacancy && !hideVacancyBadge ? '<i class="fas fa-triangle-exclamation mr-1" title="Materia en vacante"></i>' : ''}${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
                <p class="text-xs text-gray-500 mt-1">${subject.tipo_materia === 'optativa' ? `Optativa · Etapa ${formatSubjectStage(subject.etapa)}` : 'Obligatoria'} · ${subject.semestre}° semestre</p>`
             : '<p class="font-medium text-sm text-gray-400 italic">Materia sin seleccionar</p><p class="text-xs text-gray-400 mt-1">Agrega la materia para habilitar los horarios</p>'
           }
           ${subject
             ? (assignedTeacher
-                ? `<p class="text-xs text-blue-700 mt-1 truncate max-w-[180px]" title="${escapeHtml(assignedTeacher.nombre)}">${escapeHtml(assignedTeacher.nombre)}</p>`
+                ? `<p class="text-xs ${isVacancy && !hideVacancyBadge ? 'text-red-700 font-semibold' : (isVacancy ? 'text-gray-400' : 'text-blue-700')} mt-1 truncate max-w-[180px]" title="${escapeHtml(assignedTeacher.nombre)}">${isVacancy ? (hideVacancyBadge ? 'Sin docente' : 'Vacante (sin docente)') : escapeHtml(assignedTeacher.nombre)}</p>`
                 : '<p class="text-xs text-gray-400 mt-1">Sin docente</p>')
             : ''
           }
@@ -3042,8 +3230,14 @@
             </button>
             ${subject
               ? `<button type="button" class="row-assign-teacher-btn text-xs text-white bg-green-600 hover:bg-green-700 px-2 py-1 rounded" data-materia-id="${subject.id}">
-                   ${assignedTeacher ? 'Cambiar docente' : 'Asignar docente'}
-                 </button>`
+                   ${hasRealTeacher ? 'Cambiar docente' : 'Asignar docente'}
+                 </button>
+                 ${hasTeacherAssignment
+                   ? `<button type="button" class="row-remove-teacher-btn text-xs text-white bg-gray-500 hover:bg-gray-600 px-2 py-1 rounded" data-materia-id="${subject.id}">
+                        Quitar docente
+                      </button>`
+                   : ''
+                 }`
               : ''
             }
             <button type="button" class="manual-row-remove-btn text-xs text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded" data-row-id="${escapeHtml(row.rowId)}">
@@ -3155,7 +3349,12 @@
       // In-session optativas seleccionadas desde el botón de fila (aún sin bloques)
       const assignedOptativaBlockIdsSet = new Set(assignedOptativaIds);
       const sessionOptativaSubjects = state.optativaAssignments
-        .map(mid => optativaSubjectsInPlan.find(s => Number(s.id) === Number(mid)))
+        .map(mid => {
+          const sid = Number(mid);
+          return optativaSubjectsInPlan.find(s => Number(s.id) === sid)
+            || state.optativaCatalogCache.get(sid)
+            || state.materias.find(s => Number(s.id) === sid && s.tipo_materia === 'optativa');
+        })
         .filter(s => s && !assignedOptativaBlockIdsSet.has(s.id));
 
       const totalSlots = getOptativaSlotCount(planClave, semester);
@@ -3207,6 +3406,7 @@
         const viewBtn = document.getElementById('schedule-view-teacher-btn');
         viewBtn.dataset.teacherId = '';
         viewBtn.classList.add('hidden');
+        syncUniversityBreakOptionStates();
         validateScheduleBlock();
         return;
       }
@@ -3221,6 +3421,7 @@
       const viewBtn = document.getElementById('schedule-view-teacher-btn');
       viewBtn.dataset.teacherId = String(teacher.id);
       viewBtn.classList.remove('hidden');
+      syncUniversityBreakOptionStates();
       validateScheduleBlock();
     }
 
@@ -3762,6 +3963,13 @@
         });
       });
 
+      document.querySelectorAll('.row-remove-teacher-btn').forEach(btn => {
+        btn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          await removeRowTeacherAssignment(btn.getAttribute('data-materia-id'));
+        });
+      });
+
       document.querySelectorAll('.row-choose-subject-btn').forEach(btn => {
         btn.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -3769,12 +3977,27 @@
           state.pickerTargetCustomRowId = rowId || null;
           state.pickerAllowAllSubjects = btn.getAttribute('data-allow-all') === '1';
           state.pickerTargetSlotIndex = rowId ? null : 0; // non-null = slot optativa context
+          state.pickerTargetOptativaSubjectId = null;
           state.scheduleSubjectSearch = '';
           state.scheduleSubjectTypeFilter = 'all';
           document.getElementById('schedule-subject-search').value = '';
           document.getElementById('schedule-subject-type').value = 'all';
           renderScheduleSubjectPicker();
           document.getElementById('schedule-subject-picker-modal').classList.remove('hidden');
+        });
+      });
+
+      document.querySelectorAll('.row-change-optativa-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          openOptativaReplacePicker(btn.getAttribute('data-subject-id'));
+        });
+      });
+
+      document.querySelectorAll('.row-remove-optativa-btn').forEach(btn => {
+        btn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          await removeOptativaSelection(btn.getAttribute('data-subject-id'));
         });
       });
 
@@ -3827,6 +4050,46 @@
       );
     }
 
+    async function refreshGroupSummary(groupId) {
+      if (!groupId) {
+        return;
+      }
+
+      try {
+        const response = await fetchApi(`/grupos/${groupId}/resumen`);
+        const nextSummary = response.data;
+        const currentIndex = state.summaries.findIndex(item => Number(item?.grupo?.id) === Number(groupId));
+        if (currentIndex >= 0) {
+          state.summaries[currentIndex] = nextSummary;
+        } else {
+          state.summaries.push(nextSummary);
+        }
+      } catch (error) {
+        // Si falla, mantenemos resumen previo para no bloquear flujo de captura.
+      }
+    }
+
+    async function refreshCurrentGroupAfterSchedule(options = {}) {
+      if (!state.selectedGroupId) {
+        await refreshAll(options);
+        return;
+      }
+
+      setBackendStatus('Sincronizando grupo...', 'loading');
+
+      await Promise.all([
+        loadGroupContext(state.selectedGroupId, {
+          preserveDrafts: options.preserveDraftSchedule !== false,
+        }),
+        refreshTeachersForPicker(),
+        refreshGroupSummary(state.selectedGroupId),
+      ]);
+
+      renderDashboard();
+      renderTeachers();
+      setBackendStatus('Conectado', 'ok');
+    }
+
     async function loadGroupContext(groupId, options = {}) {
       const [detailResponse, scheduleResponse, observationsResponse] = await Promise.all([
         fetchApi(`/grupos/${groupId}`),
@@ -3834,12 +4097,14 @@
         fetchApi(`/grupos/${groupId}/observaciones`),
       ]);
 
-      const preserveDrafts = Boolean(options.preserveDrafts);
+      const preserveDrafts = options.preserveDrafts !== false;
       const preserved = preserveDrafts
         ? preserveDraftScheduleStateForGroup(groupId, detailResponse.data, scheduleResponse.data)
         : {
             rowTeachers: new Map(),
+            vacancyVisualOverrides: new Set(),
             optativaAssignments: [],
+            optativaCatalogCache: new Map(),
             customScheduleRows: [],
             scheduleObservations: new Map(),
           };
@@ -3849,9 +4114,18 @@
       state.selectedGroupSchedule = scheduleResponse.data;
       state.scheduleObservationEntries = observationsResponse.data || [];
       state.rowTeachers = preserved.rowTeachers;
+      state.vacancyVisualOverrides = preserved.vacancyVisualOverrides;
       state.optativaAssignments = preserved.optativaAssignments;
+      state.optativaCatalogCache = preserved.optativaCatalogCache;
       state.customScheduleRows = preserved.customScheduleRows;
       state.scheduleObservations = preserved.scheduleObservations;
+
+      (state.selectedGroupDetail?.materias_disponibles || [])
+        .filter(subject => subject?.tipo_materia === 'optativa')
+        .forEach(subject => {
+          state.optativaCatalogCache.set(Number(subject.id), subject);
+        });
+
       renderGroupSelector();
       renderSchedule();
     }
@@ -3869,7 +4143,7 @@
 
       if (state.selectedGroupId) {
         await loadGroupContext(state.selectedGroupId, {
-          preserveDrafts: Boolean(options.preserveDraftSchedule),
+          preserveDrafts: options.preserveDraftSchedule !== false,
         });
       } else if (state.grupos.length) {
         await loadGroupContext(state.grupos[0].id);
@@ -3904,7 +4178,7 @@
         const startHour = Number(document.getElementById('hora-inicio').value);
         const endHour = Number(document.getElementById('hora-fin').value);
 
-        if (hasUniversityBreakConflict(day, startHour, endHour)) {
+        if (!isSelectedScheduleTeacherJudge() && hasUniversityBreakConflict(day, startHour, endHour)) {
           warning.querySelector('span').textContent = getUniversityBreakConflictMessage(day, startHour, endHour);
           warning.classList.remove('hidden');
           return;
@@ -3946,6 +4220,7 @@
 
     function openScheduleSubjectPickerModal() {
       state.pickerTargetSlotIndex = null; // form context
+      state.pickerTargetOptativaSubjectId = null;
       state.pickerTargetCustomRowId = null;
       state.pickerAllowAllSubjects = isCurrentManualScheduleGroup();
       state.scheduleSubjectSearch = '';
@@ -3978,6 +4253,7 @@
         }
 
         state.rowTeachers.set(String(materiaId), Number(teacherId));
+        state.vacancyVisualOverrides.delete(Number(materiaId));
         state.pickerTargetMateriaId = null;
         document.getElementById('schedule-teacher-picker-modal').classList.add('hidden');
 
@@ -3995,7 +4271,7 @@
           }
         }
 
-        await refreshAll({ preserveDraftSchedule: true });
+        await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
       } else {
         // Contexto formulario: verificar observación y después asignar
         const materiaId = Number(document.getElementById('schedule-materia-id').value);
@@ -4043,10 +4319,10 @@
         showToast('Bloques de juez asignados automáticamente.', 'success');
       }
 
-      await loadGroupContext(state.selectedGroupId);
+      await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
     }
 
-    window.selectScheduleSubject = function(subjectId) {
+    window.selectScheduleSubject = async function(subjectId) {
       if (state.pickerTargetCustomRowId !== null) {
         const target = state.customScheduleRows.find(row => row.rowId === state.pickerTargetCustomRowId);
         if (target) {
@@ -4054,22 +4330,60 @@
         }
         state.pickerTargetCustomRowId = null;
         state.pickerAllowAllSubjects = false;
+        state.pickerTargetOptativaSubjectId = null;
         document.getElementById('schedule-subject-picker-modal').classList.add('hidden');
         renderSchedule();
       } else if (state.pickerTargetSlotIndex !== null) {
         // Contexto slot optativa: agregar a assignments pendientes
         const mid = Number(subjectId);
-        if (!state.optativaAssignments.includes(mid)) {
+        rememberOptativaSubject(mid);
+        const replacingSubjectId = Number(state.pickerTargetOptativaSubjectId);
+        const replacing = Number.isFinite(replacingSubjectId) && replacingSubjectId > 0;
+
+        if (replacing) {
+          const subjectBlocks = getSubjectBlocksFromCurrentSchedule(replacingSubjectId);
+          if (subjectBlocks.length) {
+            const confirmed = window.confirm('La optativa actual tiene horarios capturados. Al cambiarla se eliminarán esos bloques. ¿Deseas continuar?');
+            if (!confirmed) {
+              return;
+            }
+
+            try {
+              for (const block of subjectBlocks) {
+                await fetchApi(`/horarios/bloques/${block.id}`, { method: 'DELETE' });
+              }
+            } catch (error) {
+              showToast(getErrorMessage(error, 'No fue posible cambiar la optativa porque no se pudieron eliminar sus bloques.'), 'error');
+              return;
+            }
+          }
+
+          state.optativaAssignments = state.optativaAssignments
+            .filter(assignmentId => Number(assignmentId) !== replacingSubjectId);
+          state.rowTeachers.delete(String(replacingSubjectId));
+        }
+
+        const alreadyOnSchedule = getSubjectBlocksFromCurrentSchedule(mid).length > 0;
+        const alreadyInAssignments = state.optativaAssignments
+          .some(assignmentId => Number(assignmentId) === mid);
+        if (!alreadyOnSchedule && !alreadyInAssignments) {
           state.optativaAssignments.push(mid);
         }
+
         state.pickerTargetSlotIndex = null;
+        state.pickerTargetOptativaSubjectId = null;
         state.pickerAllowAllSubjects = false;
         document.getElementById('schedule-subject-picker-modal').classList.add('hidden');
-        renderSchedule();
+        if (replacing) {
+          await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
+        } else {
+          renderSchedule();
+        }
       } else {
         // Contexto formulario: set subject en el modal de bloque
         setScheduleSubject(subjectId);
         state.pickerAllowAllSubjects = false;
+        state.pickerTargetOptativaSubjectId = null;
         document.getElementById('schedule-subject-picker-modal').classList.add('hidden');
         validateScheduleBlock();
       }
@@ -4621,7 +4935,7 @@
       const startHour = Number(document.getElementById('hora-inicio').value);
       const endHour = Number(document.getElementById('hora-fin').value);
 
-      if (hasUniversityBreakConflict(selectedDay, startHour, endHour)) {
+      if (!isSelectedScheduleTeacherJudge() && hasUniversityBreakConflict(selectedDay, startHour, endHour)) {
         showToast(getUniversityBreakConflictMessage(selectedDay, startHour, endHour), 'warning');
         return;
       }
@@ -4660,7 +4974,7 @@
 
         document.getElementById('add-schedule-modal').classList.add('hidden');
         resetScheduleModal();
-        await refreshAll({ preserveDraftSchedule: true });
+        await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
         showToast(isEditing ? 'Bloque de horario actualizado correctamente.' : 'Bloque de horario creado correctamente.');
       } catch (error) {
         showToast(getErrorMessage(error, isEditing ? 'No fue posible actualizar el horario.' : 'No fue posible guardar el horario.'), 'error');
@@ -4693,7 +5007,7 @@
             data: { slots: updatedSlots },
           });
           showToast('Horario de juez actualizado también.', 'info');
-          await refreshAll();
+          await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
         } catch (err) {
           showToast(getErrorMessage(err, 'El bloque se guardó, pero no se pudo actualizar el horario de juez.'), 'warning');
         }
@@ -4730,7 +5044,7 @@
         await fetchApi(`/horarios/bloques/${state.editingScheduleBlockId}`, { method: 'DELETE' });
         document.getElementById('add-schedule-modal').classList.add('hidden');
         resetScheduleModal();
-        await refreshAll({ preserveDraftSchedule: true });
+        await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
         showToast('Bloque eliminado correctamente.');
       } catch (error) {
         showToast(getErrorMessage(error, 'No fue posible eliminar el bloque.'), 'error');
