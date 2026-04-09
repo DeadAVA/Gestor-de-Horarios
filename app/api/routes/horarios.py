@@ -1,5 +1,6 @@
 from flask import Blueprint, request
 
+from app.services.horario_observacion_service import HorarioObservacionService
 from app.services.horario_service import HorarioService
 from app.services.response_service import success_response
 from app.services.summary_service import SummaryService
@@ -66,3 +67,27 @@ def get_group_summary(group_id: int):
 def get_plan_summary(plan_id: int):
     data = SummaryService.get_plan_summary(plan_id)
     return success_response("Resumen del plan obtenido correctamente", data)
+
+
+@horarios_bp.get("/grupos/<int:group_id>/observaciones")
+def list_schedule_observations(group_id: int):
+    data = HorarioObservacionService.list_group_observations(group_id)
+    return success_response("Observaciones del grupo obtenidas correctamente", data)
+
+
+@horarios_bp.post("/grupos/<int:group_id>/observaciones")
+def create_schedule_observation(group_id: int):
+    data = HorarioObservacionService.create_observation(group_id, request.get_json(silent=True) or {})
+    return success_response("Observacion creada correctamente", data, status_code=201)
+
+
+@horarios_bp.patch("/horarios/observaciones/<int:observation_id>")
+def update_schedule_observation(observation_id: int):
+    data = HorarioObservacionService.update_observation(observation_id, request.get_json(silent=True) or {})
+    return success_response("Observacion actualizada correctamente", data)
+
+
+@horarios_bp.delete("/horarios/observaciones/<int:observation_id>")
+def delete_schedule_observation(observation_id: int):
+    data = HorarioObservacionService.delete_observation(observation_id)
+    return success_response("Observacion eliminada correctamente", data)

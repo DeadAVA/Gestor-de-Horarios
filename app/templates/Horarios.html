@@ -135,6 +135,34 @@
     .tab-active {
       border-bottom: 2px solid var(--primary-color);
     }
+
+    .observation-attention-box {
+      background: #fff7d6;
+      border: 1px solid #f5d56a;
+      border-left: 4px solid #d97706;
+      border-radius: 8px;
+      padding: 8px;
+    }
+
+    .observation-attention-tag {
+      display: inline-block;
+      background: #fde68a;
+      color: #92400e;
+      border-radius: 9999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .observation-attention-text {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #78350f;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   </style>
 </head>
 <body class="flex h-screen overflow-hidden">
@@ -556,29 +584,47 @@
               <button id="schedule-add-row-btn" class="hidden px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-white flex items-center">
                 <i class="fas fa-plus mr-2"></i> Agregar renglón
               </button>
+              <button id="schedule-observations-btn" class="px-4 py-2 bg-amber-100 hover:bg-amber-200 rounded-md flex items-center text-amber-900">
+                <i class="fas fa-note-sticky mr-2"></i> Observaciones
+              </button>
               <button id="print-schedule-btn" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md flex items-center">
                 <i class="fas fa-file-export mr-2"></i> Exportar
               </button>
             </div>
           </div>
           
-          <div class="bg-white rounded-lg shadow overflow-hidden">
-            <div class="overflow-x-auto">
-              <table class="min-w-full">
-                <thead>
-                  <tr class="bg-gray-50">
-                    <th class="py-3 px-4 text-left min-w-72">Materia del semestre</th>
-                    <th class="py-3 px-4 text-left">Lunes</th>
-                    <th class="py-3 px-4 text-left">Martes</th>
-                    <th class="py-3 px-4 text-left">Miércoles</th>
-                    <th class="py-3 px-4 text-left">Jueves</th>
-                    <th class="py-3 px-4 text-left">Viernes</th>
-                    <th class="py-3 px-4 text-left">Sábado</th>
-                  </tr>
-                </thead>
-                <tbody id="schedule-grid-body"></tbody>
-              </table>
+          <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+            <div class="xl:col-span-10 bg-white rounded-lg shadow overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="min-w-full">
+                  <thead>
+                    <tr class="bg-gray-50">
+                      <th class="py-3 px-4 text-left min-w-72">Materia del semestre</th>
+                      <th class="py-3 px-4 text-left">Lunes</th>
+                      <th class="py-3 px-4 text-left">Martes</th>
+                      <th class="py-3 px-4 text-left">Miércoles</th>
+                      <th class="py-3 px-4 text-left">Jueves</th>
+                      <th class="py-3 px-4 text-left">Viernes</th>
+                      <th class="py-3 px-4 text-left">Sábado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="schedule-grid-body"></tbody>
+                </table>
+              </div>
             </div>
+            <aside class="xl:col-span-2 bg-white rounded-lg shadow border border-amber-200 xl:max-w-[300px] xl:justify-self-end w-full">
+              <div class="p-4 border-b border-amber-100 bg-amber-50">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-sm font-bold text-amber-900">Observaciones</h3>
+                  <span id="schedule-observations-side-count" class="px-2 py-1 rounded-full bg-amber-200 text-amber-900 text-xs font-semibold">0</span>
+                </div>
+                <p class="text-xs text-amber-800 mt-1">Seguimiento rápido al lado del horario.</p>
+                <button id="schedule-observations-side-add-btn" type="button" class="mt-2 text-xs text-white bg-amber-600 hover:bg-amber-700 px-2 py-1 rounded">
+                  Agregar mas
+                </button>
+              </div>
+              <div id="schedule-observations-side-body" class="p-3 space-y-2 max-h-[70vh] overflow-y-auto"></div>
+            </aside>
           </div>
         </div>
 
@@ -1136,6 +1182,49 @@
     </div>
   </div>
 
+  <div id="schedule-observations-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden">
+    <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50"></div>
+    <div class="modal-content bg-white w-full max-w-4xl mx-4 rounded-lg shadow-lg z-10">
+      <div class="p-5">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h3 class="text-lg font-bold">Observaciones del horario</h3>
+            <p id="schedule-observations-subtitle" class="text-sm text-gray-600">Administra observaciones del grupo seleccionado.</p>
+          </div>
+          <button id="schedule-observations-close-btn" class="text-gray-400 hover:text-gray-600">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <form id="schedule-observation-form" class="border border-gray-200 rounded-md p-4 mb-4 bg-gray-50">
+          <input type="hidden" id="schedule-observation-id">
+          <div class="mb-3">
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="schedule-observation-text">Comentario</label>
+            <textarea id="schedule-observation-text" rows="3" maxlength="1000" placeholder="Escribe aquí la observación..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"></textarea>
+          </div>
+          <div class="flex justify-between items-center">
+            <button type="button" id="schedule-observation-cancel-btn" class="hidden px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded-md text-sm">Cancelar edición</button>
+            <button type="submit" id="schedule-observation-submit-btn" class="btn-primary px-4 py-2 rounded-md text-white text-sm ml-auto">Agregar observación</button>
+          </div>
+        </form>
+
+        <div class="overflow-x-auto max-h-[45vh]">
+          <table class="min-w-full">
+            <thead>
+              <tr class="bg-gray-50">
+                <th class="py-2 px-3 text-left text-sm font-semibold">Ámbito</th>
+                <th class="py-2 px-3 text-left text-sm font-semibold">Comentario</th>
+                <th class="py-2 px-3 text-left text-sm font-semibold">Actualizado</th>
+                <th class="py-2 px-3 text-left text-sm font-semibold">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="schedule-observations-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="teacher-availability-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden">
     <div class="modal-backdrop absolute inset-0 bg-black bg-opacity-50"></div>
     <div class="modal-content bg-white w-full max-w-5xl mx-4 rounded-lg shadow-lg z-10">
@@ -1558,6 +1647,9 @@
       pickerTargetCustomRowId: null,
       pickerAllowAllSubjects: false,
       customScheduleRows: [],
+      scheduleObservations: new Map(),
+      scheduleObservationEntries: [],
+      editingScheduleObservationId: null,
       selectedGroupId: null,
       selectedGroupDetail: null,
       selectedGroupSchedule: null,
@@ -2629,6 +2721,7 @@
           rowTeachers: new Map(),
           optativaAssignments: [],
           customScheduleRows: [],
+          scheduleObservations: new Map(),
         };
       }
 
@@ -2640,6 +2733,11 @@
           .filter(block => block?.materia?.tipo_materia === 'optativa')
           .map(block => Number(block?.materia?.id))
       );
+      const previouslyAssignedOptativaIds = new Set(
+        (state.selectedGroupSchedule?.bloques_horario || [])
+          .filter(block => block?.materia?.tipo_materia === 'optativa')
+          .map(block => Number(block?.materia?.id))
+      );
 
       const preservedRowTeachers = new Map(
         Array.from(state.rowTeachers.entries()).filter(([subjectId]) => validSubjectIds.has(Number(subjectId)))
@@ -2648,13 +2746,31 @@
         const sid = Number(subjectId);
         return validSubjectIds.has(sid) && !assignedOptativaIds.has(sid);
       });
+      const restoredOptativas = Array.from(previouslyAssignedOptativaIds).filter(subjectId => (
+        validSubjectIds.has(subjectId) && !assignedOptativaIds.has(subjectId)
+      ));
+      const mergedOptativas = [...new Set([...preservedOptativas.map(Number), ...restoredOptativas])];
       const preservedRows = state.customScheduleRows
         .filter(row => row.subjectId === null || validSubjectIds.has(Number(row.subjectId)));
+      const preservedRowObservationKeys = new Set(preservedRows.map(row => `row:${row.rowId}`));
+      const preservedObservations = new Map(
+        Array.from(state.scheduleObservations.entries()).filter(([key]) => {
+          if (key.startsWith('subject:')) {
+            const subjectId = Number(key.split(':')[1] || 0);
+            return validSubjectIds.has(subjectId);
+          }
+          if (key.startsWith('row:')) {
+            return preservedRowObservationKeys.has(key);
+          }
+          return false;
+        })
+      );
 
       return {
         rowTeachers: preservedRowTeachers,
-        optativaAssignments: preservedOptativas,
+        optativaAssignments: mergedOptativas,
         customScheduleRows: preservedRows,
+        scheduleObservations: preservedObservations,
       };
     }
 
@@ -2676,6 +2792,80 @@
         });
       });
       return map;
+    }
+
+    function formatObservationDateTime(value) {
+      if (!value) {
+        return '-';
+      }
+
+      let normalizedValue = String(value).trim();
+      // Los timestamps del backend se guardan en UTC sin sufijo de zona en SQLite.
+      // Si no viene zona horaria explicita, forzamos interpretacion UTC.
+      if (normalizedValue && !/(Z|[+\-]\d{2}:?\d{2})$/i.test(normalizedValue)) {
+        normalizedValue = `${normalizedValue}Z`;
+      }
+
+      const date = new Date(normalizedValue);
+      if (Number.isNaN(date.getTime())) {
+        return '-';
+      }
+      return date.toLocaleString('es-MX', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+
+    function renderScheduleObservationsAside() {
+      const container = document.getElementById('schedule-observations-side-body');
+      const count = document.getElementById('schedule-observations-side-count');
+      if (!container || !count) {
+        return;
+      }
+
+      const items = [...(state.scheduleObservationEntries || [])].sort((a, b) => {
+        const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
+        const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
+        return bTime - aTime;
+      });
+
+      count.textContent = String(items.length);
+
+      if (!state.selectedGroupSchedule) {
+        container.innerHTML = '<p class="text-xs text-gray-400">Selecciona un grupo para ver observaciones.</p>';
+        return;
+      }
+
+      if (!items.length) {
+        container.innerHTML = `
+          <div class="observation-attention-box">
+            <span class="observation-attention-tag">Sin pendientes</span>
+            <p class="observation-attention-text">No hay observaciones registradas para este grupo.</p>
+            <button type="button" class="mt-2 text-xs text-white bg-amber-600 hover:bg-amber-700 px-2 py-1 rounded" onclick="openScheduleObservationsModal()">Agregar mas</button>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = items.slice(0, 8).map(item => {
+        const materiaLabel = item.materia
+          ? `${escapeHtml(item.materia.clave)} - ${escapeHtml(item.materia.nombre)}`
+          : 'General del grupo';
+        return `
+          <article class="observation-attention-box">
+            <div class="flex items-center justify-between gap-2">
+              <span class="observation-attention-tag">Atender</span>
+              <span class="text-[11px] text-amber-900">${escapeHtml(formatObservationDateTime(item.updated_at))}</span>
+            </div>
+            <p class="text-[11px] text-amber-900 font-semibold mt-1">${materiaLabel}</p>
+            <p class="observation-attention-text">${escapeHtml(item.comentario)}</p>
+            <button type="button" class="mt-2 text-xs text-amber-900 hover:text-amber-700 font-semibold" onclick="openScheduleObservationsModal()">Ver</button>
+          </article>
+        `;
+      }).join('');
     }
 
     function getTeacherHorasInSchedule(teacherId) {
@@ -2849,6 +3039,7 @@
         currentPlan.textContent = 'Sin seleccionar';
         addRowBtn.classList.add('hidden');
         renderEmptyState('schedule-grid-body', 7, 'Selecciona un grupo para ver su horario.');
+        renderScheduleObservationsAside();
         return;
       }
 
@@ -2881,11 +3072,13 @@
 
         if (!state.customScheduleRows.length) {
           renderEmptyState('schedule-grid-body', 7, 'No hay renglones capturados para este grupo.');
+          renderScheduleObservationsAside();
           return;
         }
 
         tbody.innerHTML = state.customScheduleRows.map(row => renderManualScheduleRow(row, dayBlocks, allSubjects)).join('');
         bindScheduleCellEvents();
+        renderScheduleObservationsAside();
         return;
       }
 
@@ -2913,6 +3106,7 @@
 
       if (!obligatoriasSubjects.length && !totalSlots) {
         renderEmptyState('schedule-grid-body', 7, 'No hay materias registradas para este semestre.');
+        renderScheduleObservationsAside();
         return;
       }
 
@@ -2925,6 +3119,7 @@
 
       tbody.innerHTML = [...obligatoriaRows, ...assignedOptativaRows, ...sessionOptativaRows, ...placeholderRows].join('');
       bindScheduleCellEvents();
+      renderScheduleObservationsAside();
     }
 
     function setScheduleSubject(subjectId) {
@@ -3327,6 +3522,89 @@
       document.getElementById('schedule-teacher-picker-modal').classList.remove('hidden');
     }
 
+    function resetScheduleObservationForm() {
+      state.editingScheduleObservationId = null;
+      document.getElementById('schedule-observation-id').value = '';
+      document.getElementById('schedule-observation-text').value = '';
+      document.getElementById('schedule-observation-submit-btn').textContent = 'Agregar observación';
+      document.getElementById('schedule-observation-cancel-btn').classList.add('hidden');
+    }
+
+    function renderScheduleObservationsModal() {
+      const tbody = document.getElementById('schedule-observations-table-body');
+      const rows = state.scheduleObservationEntries;
+
+      if (!rows.length) {
+        renderEmptyState('schedule-observations-table-body', 4, 'No hay observaciones registradas.');
+        return;
+      }
+
+      tbody.innerHTML = rows.map(item => {
+        return `
+          <tr class="border-t">
+            <td class="py-2 px-3 text-sm">General del grupo</td>
+            <td class="py-2 px-3 text-sm">
+              <div class="observation-attention-box">
+                <span class="observation-attention-tag">Pendiente de atención</span>
+                <p class="observation-attention-text">${escapeHtml(item.comentario)}</p>
+              </div>
+            </td>
+            <td class="py-2 px-3 text-sm">${escapeHtml(formatObservationDateTime(item.updated_at))}</td>
+            <td class="py-2 px-3 text-sm">
+              <button type="button" class="text-amber-700 hover:text-amber-900 mr-3" onclick="window.editScheduleObservation(${item.id})">Editar</button>
+              <button type="button" class="text-red-600 hover:text-red-800" onclick="window.deleteScheduleObservation(${item.id})">Eliminar</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openScheduleObservationsModal() {
+      if (!state.selectedGroupId) {
+        showToast('Selecciona un grupo antes de gestionar observaciones.', 'warning');
+        return;
+      }
+
+      document.getElementById('schedule-observations-subtitle').textContent = 'Mostrando observaciones generales del grupo.';
+      resetScheduleObservationForm();
+      renderScheduleObservationsModal();
+      document.getElementById('schedule-observations-modal').classList.remove('hidden');
+    }
+
+    window.editScheduleObservation = function(observationId) {
+      const item = state.scheduleObservationEntries.find(entry => Number(entry.id) === Number(observationId));
+      if (!item) {
+        showToast('No se encontró la observación seleccionada.', 'error');
+        return;
+      }
+
+      state.editingScheduleObservationId = Number(item.id);
+      document.getElementById('schedule-observation-id').value = String(item.id);
+      document.getElementById('schedule-observation-text').value = item.comentario || '';
+      document.getElementById('schedule-observation-submit-btn').textContent = 'Guardar cambios';
+      document.getElementById('schedule-observation-cancel-btn').classList.remove('hidden');
+    };
+
+    window.deleteScheduleObservation = async function(observationId) {
+      const confirmation = window.confirm('¿Seguro que deseas eliminar esta observación?');
+      if (!confirmation) {
+        return;
+      }
+
+      try {
+        await fetchApi(`/horarios/observaciones/${observationId}`, { method: 'DELETE' });
+        state.scheduleObservationEntries = state.scheduleObservationEntries.filter(item => Number(item.id) !== Number(observationId));
+        if (Number(state.editingScheduleObservationId) === Number(observationId)) {
+          resetScheduleObservationForm();
+        }
+        renderScheduleObservationsModal();
+        renderSchedule();
+        showToast('Observación eliminada correctamente.');
+      } catch (error) {
+        showToast(getErrorMessage(error, 'No fue posible eliminar la observación.'), 'error');
+      }
+    };
+
     function openScheduleModalForCreate(day, materiaId) {
       resetScheduleModal();
       setScheduleSubject(materiaId);
@@ -3428,6 +3706,7 @@
           renderSchedule();
         });
       });
+
     }
 
     async function fetchApi(path, options = {}) {
@@ -3466,9 +3745,10 @@
     }
 
     async function loadGroupContext(groupId, options = {}) {
-      const [detailResponse, scheduleResponse] = await Promise.all([
+      const [detailResponse, scheduleResponse, observationsResponse] = await Promise.all([
         fetchApi(`/grupos/${groupId}`),
         fetchApi(`/grupos/${groupId}/horarios`),
+        fetchApi(`/grupos/${groupId}/observaciones`),
       ]);
 
       const preserveDrafts = Boolean(options.preserveDrafts);
@@ -3478,14 +3758,17 @@
             rowTeachers: new Map(),
             optativaAssignments: [],
             customScheduleRows: [],
+            scheduleObservations: new Map(),
           };
 
       state.selectedGroupId = Number(groupId);
       state.selectedGroupDetail = detailResponse.data;
       state.selectedGroupSchedule = scheduleResponse.data;
+      state.scheduleObservationEntries = observationsResponse.data || [];
       state.rowTeachers = preserved.rowTeachers;
       state.optativaAssignments = preserved.optativaAssignments;
       state.customScheduleRows = preserved.customScheduleRows;
+      state.scheduleObservations = preserved.scheduleObservations;
       renderGroupSelector();
       renderSchedule();
     }
@@ -4016,6 +4299,7 @@
         document.getElementById('add-schedule-modal').classList.add('hidden');
         document.getElementById('schedule-teacher-picker-modal').classList.add('hidden');
         document.getElementById('schedule-subject-picker-modal').classList.add('hidden');
+        document.getElementById('schedule-observations-modal').classList.add('hidden');
         document.getElementById('teacher-availability-modal').classList.add('hidden');
         document.getElementById('add-group-modal').classList.add('hidden');
         document.getElementById('add-teacher-modal').classList.add('hidden');
@@ -4099,6 +4383,63 @@
         return;
       }
       addManualScheduleRow();
+    });
+
+    document.getElementById('schedule-observations-btn').addEventListener('click', () => {
+      openScheduleObservationsModal();
+    });
+
+    document.getElementById('schedule-observations-side-add-btn').addEventListener('click', () => {
+      openScheduleObservationsModal();
+    });
+
+    document.getElementById('schedule-observations-close-btn').addEventListener('click', () => {
+      document.getElementById('schedule-observations-modal').classList.add('hidden');
+      resetScheduleObservationForm();
+    });
+
+    document.getElementById('schedule-observation-cancel-btn').addEventListener('click', () => {
+      resetScheduleObservationForm();
+    });
+
+    document.getElementById('schedule-observation-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      if (!state.selectedGroupId) {
+        showToast('Selecciona un grupo antes de guardar observaciones.', 'warning');
+        return;
+      }
+
+      const comentario = document.getElementById('schedule-observation-text').value.trim();
+      const payload = {
+        comentario,
+      };
+
+      try {
+        if (state.editingScheduleObservationId) {
+          const response = await fetchApi(`/horarios/observaciones/${state.editingScheduleObservationId}`, {
+            method: 'PATCH',
+            data: payload,
+          });
+          state.scheduleObservationEntries = state.scheduleObservationEntries.map(item => (
+            Number(item.id) === Number(response.data.id) ? response.data : item
+          ));
+          showToast('Observación actualizada correctamente.');
+        } else {
+          const response = await fetchApi(`/grupos/${state.selectedGroupId}/observaciones`, {
+            method: 'POST',
+            data: payload,
+          });
+          state.scheduleObservationEntries = [response.data, ...state.scheduleObservationEntries];
+          showToast('Observación agregada correctamente.');
+        }
+
+        resetScheduleObservationForm();
+        renderScheduleObservationsModal();
+        renderSchedule();
+      } catch (error) {
+        showToast(getErrorMessage(error, 'No fue posible guardar la observación.'), 'error');
+      }
     });
 
     document.getElementById('subjects-tab-2025-1').addEventListener('click', () => setSubjectPlanTab('2025-1'));
@@ -4306,7 +4647,7 @@
         await fetchApi(`/horarios/bloques/${state.editingScheduleBlockId}`, { method: 'DELETE' });
         document.getElementById('add-schedule-modal').classList.add('hidden');
         resetScheduleModal();
-        await refreshAll();
+        await refreshAll({ preserveDraftSchedule: true });
         showToast('Bloque eliminado correctamente.');
       } catch (error) {
         showToast(getErrorMessage(error, 'No fue posible eliminar el bloque.'), 'error');

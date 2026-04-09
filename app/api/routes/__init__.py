@@ -6,7 +6,6 @@ def register_route_modules(api_bp) -> None:
     from app.api.routes.exportaciones import exportaciones_bp
     from app.api.routes.grupos import grupos_bp
     from app.api.routes.horarios import horarios_bp
-    from app.api.routes.ia import ia_bp
     from app.api.routes.materias import materias_bp
 
     api_bp.register_blueprint(catalogos_bp)
@@ -16,5 +15,4 @@ def register_route_modules(api_bp) -> None:
     api_bp.register_blueprint(docentes_bp)
     api_bp.register_blueprint(horarios_bp)
     api_bp.register_blueprint(exportaciones_bp)
-    api_bp.register_blueprint(ia_bp)
     api_bp.register_blueprint(backup_bp)

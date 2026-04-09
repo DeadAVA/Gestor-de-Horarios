@@ -45,23 +45,6 @@ class Config:
     RESOURCE_BASE_DIR = RESOURCE_BASE_DIR.as_posix()
     DATA_BASE_DIR = DATA_BASE_DIR.as_posix()
 
-    # IA local con Ollama y almacenamiento local de embeddings.
-    AI_ENABLED = True
-    AI_STRICT_LOCAL_ONLY = True
-    AI_OLLAMA_BASE_URL = os.getenv("AI_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    AI_CHAT_MODEL = os.getenv("AI_CHAT_MODEL", "qwen2.5:3b")
-    AI_EMBED_MODEL = os.getenv("AI_EMBED_MODEL", "nomic-embed-text")
-    AI_OLLAMA_MODELS_DIR = os.getenv("OLLAMA_MODELS", (INSTANCE_DIR / "ollama_models").as_posix())
-    AI_PORTABLE_SETUP_SCRIPT = os.getenv(
-        "AI_PORTABLE_SETUP_SCRIPT",
-        (INSTANCE_DIR.parent / "portable_ai_setup.ps1").as_posix(),
-    )
-    AI_VECTOR_STORE_PATH = (INSTANCE_DIR / "ai_vector_store.json").as_posix()
-    AI_UPLOAD_DIR = (INSTANCE_DIR / "ai_uploads").as_posix()
-    AI_MAX_FILE_MB = int(os.getenv("AI_MAX_FILE_MB", "20"))
-    AI_TOP_K = int(os.getenv("AI_TOP_K", "4"))
-    AI_RAG_MIN_SCORE = float(os.getenv("AI_RAG_MIN_SCORE", "0.62"))
-
 
 class DevelopmentConfig(Config):
     DEBUG = True

@@ -1,6 +1,6 @@
 # Sistema de Horarios UABC
 
-Sistema web para la gestion academica de horarios, grupos, materias y docentes, con reglas de negocio centralizadas, persistencia local en SQLite, exportaciones institucionales y soporte opcional de IA local.
+Sistema web para la gestion academica de horarios, grupos, materias y docentes, con reglas de negocio centralizadas, persistencia local en SQLite y exportaciones institucionales.
 
 Este proyecto esta orientado a escenarios academicos donde se requiere construir, validar y exportar horarios sin depender de servicios en la nube. La aplicacion puede ejecutarse en entorno de desarrollo o distribuirse como version portable para Windows.
 
@@ -10,8 +10,7 @@ Este proyecto esta orientado a escenarios academicos donde se requiere construir
 - Base de datos SQLite local para operacion sencilla y despliegue ligero.
 - API REST para grupos, materias, docentes, horarios, catalogos, respaldos y candados.
 - Exportacion a Excel, Word y PDF.
-- Soporte de IA local con Ollama para consultas sobre PDFs, aprendizaje validado e importacion asistida de docentes.
-- Empaquetado portable para Windows con almacenamiento local de datos y modelos.
+- Empaquetado portable para Windows con almacenamiento local de datos.
 
 ## Objetivo del sistema
 
@@ -21,7 +20,7 @@ Centralizar la operacion de un gestor de horarios academicos en una base manteni
 - Aplicar reglas de negocio sobre asignacion y conflictos de horario.
 - Mantener trazabilidad mediante servicios, validadores y migraciones.
 - Generar exportables listos para uso administrativo.
-- Permitir trabajo completamente local, incluyendo componentes de IA opcionales.
+- Permitir trabajo completamente local.
 
 ## Alcance funcional
 
@@ -35,7 +34,6 @@ Centralizar la operacion de un gestor de horarios academicos en una base manteni
 - Exportaciones institucionales.
 - Respaldos y restauracion.
 - Candados operativos.
-- IA local para apoyo documental.
 
 ### Endpoints base
 
@@ -47,7 +45,6 @@ Centralizar la operacion de un gestor de horarios academicos en una base manteni
 - /api/docentes
 - /api/horarios
 - /api/exportaciones
-- /api/ia
 - /api/backup
 
 ## Arquitectura
@@ -74,7 +71,6 @@ SistemaDeHorariosUABC/
 Documentacion adicional disponible en:
 
 - docs/FASE1_ARQUITECTURA.md
-- docs/IA_LOCAL.md
 - docs/exports/LOGO_INSTITUCIONAL.md
 
 ## Stack tecnico
@@ -88,7 +84,6 @@ Documentacion adicional disponible en:
 - python-docx
 - reportlab
 - pytest
-- Ollama + LangChain para IA local opcional
 
 ## Instalacion
 
@@ -156,25 +151,6 @@ El sistema incluye exportacion institucional para grupos:
 
 Si se requiere logo institucional, puede colocarse un archivo en app/assets/institution_logo.png.
 
-## IA local opcional
-
-La capa de IA esta pensada para ejecutarse localmente con Ollama y sin dependencia obligatoria de nube.
-
-Capacidades actuales:
-
-- Ingesta de PDF.
-- Consulta contextual tipo RAG.
-- Registro de conocimiento validado por usuario.
-- Importacion asistida de docentes desde texto libre.
-
-Modelos por defecto:
-
-- Chat: qwen2.5:3b
-- Alternativa: qwen2.5:7b
-- Embeddings: nomic-embed-text
-
-Mas detalle en docs/IA_LOCAL.md.
-
 ## Version portable para Windows
 
 El proyecto puede empaquetarse como aplicacion portable que ejecuta el sistema sin instalar Python en el equipo destino.
@@ -191,7 +167,6 @@ Aspectos relevantes:
 - El launcher puede abrir automaticamente el navegador.
 - Si el puerto 5000 esta ocupado, selecciona otro puerto libre.
 - El seed inicial solo corre sobre base vacia.
-- La IA local portable puede almacenar modelos dentro de la misma carpeta distribuible.
 
 ## Estado del proyecto
 
@@ -202,7 +177,6 @@ Estado actual:
 - Persistencia local y migraciones habilitadas.
 - Exportaciones institucionales implementadas.
 - Suite de pruebas presente.
-- IA local integrada como capacidad opcional.
 
 ## Contribucion
 

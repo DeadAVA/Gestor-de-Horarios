@@ -37,3 +37,8 @@ def init_extensions(app) -> None:
 
     with app.app_context():
         from app import models  # noqa: F401
+
+        if db.engine.dialect.name == "sqlite":
+            # En instalaciones locales/portable puede haber DB existente sin migraciones recientes.
+            # checkfirst=True crea solo tablas faltantes sin tocar las ya existentes.
+            db.create_all()

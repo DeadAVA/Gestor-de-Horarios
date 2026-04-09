@@ -2,13 +2,10 @@ import os
 import atexit
 import signal
 import socket
-import subprocess
 import threading
 import sys
-import time
 import webbrowser
 from pathlib import Path
-from shutil import which
 
 
 def _graceful_shutdown(signum=None, frame=None):
@@ -36,69 +33,6 @@ def _is_tcp_open(host: str, port: int, timeout: float = 0.4) -> bool:
             return True
     except OSError:
         return False
-
-
-def _resolve_ollama_executable(root_dir: Path) -> str | None:
-    candidates = [
-        root_dir / "ollama" / "ollama.exe",
-        root_dir / "ollama.exe",
-        Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe",
-    ]
-
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-
-    return which("ollama")
-
-
-def _prepare_ollama_environment(root_dir: Path) -> dict:
-    env = os.environ.copy()
-    models_dir = root_dir / "instance" / "ollama_models"
-    models_dir.mkdir(parents=True, exist_ok=True)
-
-    env["OLLAMA_MODELS"] = str(models_dir)
-    env.setdefault("OLLAMA_HOST", "127.0.0.1:11435")
-    env["AI_OLLAMA_BASE_URL"] = f"http://{env['OLLAMA_HOST']}"
-    return env
-
-
-def _ensure_ollama_running(root_dir: Path) -> None:
-    env = _prepare_ollama_environment(root_dir)
-    host_port = env.get("OLLAMA_HOST", "127.0.0.1:11435")
-    host, port_raw = host_port.split(":", 1)
-    port = int(port_raw)
-    if _is_tcp_open(host, port):
-        return
-
-    ollama_exe = _resolve_ollama_executable(root_dir)
-    if not ollama_exe:
-        print("[IA] Ollama no encontrado. La app funcionara sin IA hasta instalar/copiar Ollama.")
-        return
-
-    process = subprocess.Popen(
-        [ollama_exe, "serve"],
-        cwd=str(root_dir),
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    def _terminate_ollama() -> None:
-        if process.poll() is None:
-            process.terminate()
-
-    atexit.register(_terminate_ollama)
-
-    for _ in range(15):
-        if _is_tcp_open(host, port):
-            return
-        if process.poll() is not None:
-            break
-        time.sleep(0.2)
-
-    if not _is_tcp_open(host, port):
-        print("[IA] No fue posible iniciar Ollama automaticamente.")
 
 
 def _pick_free_port(default_port: int = 5000) -> int:
@@ -134,11 +68,6 @@ def main() -> None:
     signal.signal(signal.SIGINT, _graceful_shutdown)
 
     root_dir = _portable_root_dir()
-    portable_env = _prepare_ollama_environment(root_dir)
-    os.environ["OLLAMA_MODELS"] = portable_env["OLLAMA_MODELS"]
-    os.environ["OLLAMA_HOST"] = portable_env["OLLAMA_HOST"]
-    os.environ["AI_OLLAMA_BASE_URL"] = portable_env["AI_OLLAMA_BASE_URL"]
-    _ensure_ollama_running(root_dir)
 
     from app import create_app
 

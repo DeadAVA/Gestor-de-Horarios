@@ -1,6 +1,7 @@
 from app.models.bloque_horario import BloqueHorario
 from app.models.docente import Docente
 from app.models.grupo import Grupo
+from app.models.horario_observacion import HorarioObservacion
 from app.models.horario_juez import HorarioJuez
 from app.models.materia import Materia
 from app.models.observacion_docente import DocenteMateriaObservacion
@@ -15,4 +16,5 @@ __all__ = [
     "BloqueHorario",
     "DocenteMateriaObservacion",
     "HorarioJuez",
+    "HorarioObservacion",
 ]

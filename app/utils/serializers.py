@@ -111,3 +111,15 @@ def serialize_teacher(docente: Docente, include_hours: bool = True) -> dict:
         payload["horas_acumuladas"] = calculate_hours_from_blocks(docente.bloques_horario)
 
     return payload
+
+
+def serialize_schedule_observation(observation) -> dict:
+    return {
+        "id": observation.id,
+        "grupo_id": observation.grupo_id,
+        "materia_id": observation.materia_id,
+        "comentario": observation.comentario,
+        "created_at": observation.created_at.isoformat() if observation.created_at else None,
+        "updated_at": observation.updated_at.isoformat() if observation.updated_at else None,
+        "materia": serialize_subject(observation.materia, include_plan=False) if observation.materia else None,
+    }

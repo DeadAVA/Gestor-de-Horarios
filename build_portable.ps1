@@ -13,12 +13,6 @@ if (-not (Test-Path $python)) {
 
 $distDir = Join-Path $projectRoot 'dist'
 $buildDir = Join-Path $projectRoot 'build'
-$existingPortableModels = Join-Path $projectRoot 'dist\HorariosUABCPortable\instance\ollama_models'
-$preservedModelsDir = Join-Path $projectRoot '.tmp_portable_ollama_models'
-if (Test-Path $preservedModelsDir) { Remove-Item $preservedModelsDir -Recurse -Force }
-if (Test-Path $existingPortableModels) {
-    Move-Item $existingPortableModels $preservedModelsDir
-}
 if (Test-Path $distDir) { Remove-Item $distDir -Recurse -Force }
 if (Test-Path $buildDir) { Remove-Item $buildDir -Recurse -Force }
 
@@ -56,30 +50,6 @@ $pyInstallerArgs += 'portable_launcher.py'
 & $python -m PyInstaller @pyInstallerArgs
 
 $portableOutputDir = Join-Path $projectRoot 'dist\HorariosUABCPortable'
-$portableOllamaDir = Join-Path $portableOutputDir 'ollama'
-$portableInstanceDir = Join-Path $portableOutputDir 'instance\ollama_models'
-
-New-Item -ItemType Directory -Force -Path $portableOllamaDir | Out-Null
-New-Item -ItemType Directory -Force -Path $portableInstanceDir | Out-Null
-
-if (Test-Path $preservedModelsDir) {
-    Copy-Item (Join-Path $preservedModelsDir '*') $portableInstanceDir -Recurse -Force
-    Remove-Item $preservedModelsDir -Recurse -Force
-    Write-Host "Modelos portables preservados en: $portableInstanceDir"
-}
-
-$localOllamaExe = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
-if (Test-Path $localOllamaExe) {
-    Copy-Item $localOllamaExe (Join-Path $portableOllamaDir 'ollama.exe') -Force
-    Write-Host "Ollama copiado al paquete portable: $portableOllamaDir\\ollama.exe"
-} else {
-    Write-Warning 'No se encontro ollama.exe local; el paquete portable requerira copiarlo manualmente en dist\HorariosUABCPortable\ollama\ollama.exe'
-}
-
-$portableSetupScript = Join-Path $projectRoot 'portable_ai_setup.ps1'
-if (Test-Path $portableSetupScript) {
-    Copy-Item $portableSetupScript (Join-Path $portableOutputDir 'portable_ai_setup.ps1') -Force
-}
 
 # Copiar la base de datos actual al paquete portable
 $sourceDb = Join-Path $projectRoot 'instance\horarios.db'

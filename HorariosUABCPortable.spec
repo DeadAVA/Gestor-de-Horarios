@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:\\Users\\alanv\\Desktop\\SistemaDeHorariosUABC\\app_icon.ico'],
+    icon=['app_icon.ico'],
 )
 coll = COLLECT(
     exe,
