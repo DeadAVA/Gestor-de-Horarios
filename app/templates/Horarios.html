@@ -2277,7 +2277,11 @@
       const planKeys = new Set(state.grupos.map(group => group.plan_estudio.clave));
       const activeTeachers = state.docentes.filter(docente => docente.activo);
       const saturatedTeachers = state.docentes.filter(docente => Number(docente.horas_acumuladas || 0) >= 25);
-      const missingSubjectsCount = state.summaries.reduce((acc, item) => acc + item.materias_sin_docente.length, 0);
+      const getSubjectsWithoutScheduleForSummary = (summary) => {
+        const scheduledSubjectIds = new Set((summary.bloques_horario || []).map(block => Number(block.materia?.id)));
+        return (summary.materias_sin_docente || []).filter(materia => !scheduledSubjectIds.has(Number(materia?.id)));
+      };
+      const missingSubjectsCount = state.summaries.reduce((acc, item) => acc + getSubjectsWithoutScheduleForSummary(item).length, 0);
       const vacancySubjectsCount = state.summaries.reduce((acc, item) => {
         const vacancyBlocks = (item.bloques_horario || []).filter(b => b.docente?.clave_docente === 'VACANTE-SISTEMA');
         const uniqueMaterias = new Set(vacancyBlocks.map(b => `${item.grupo?.id}-${b.materia?.id}`));
@@ -2309,7 +2313,7 @@
 
       const pendingBody = document.getElementById('dashboard-grupos-pendientes-body');
       const pendingRows = [...state.summaries]
-        .sort((a, b) => b.materias_sin_docente.length - a.materias_sin_docente.length)
+        .sort((a, b) => getSubjectsWithoutScheduleForSummary(b).length - getSubjectsWithoutScheduleForSummary(a).length)
         .slice(0, 6);
 
       if (!pendingRows.length) {
@@ -2319,7 +2323,7 @@
           <tr class="border-t">
             <td class="py-3 px-4">${getGroupDisplayName(summary.grupo)}</td>
             <td class="py-3 px-4">${summary.grupo.semestre}</td>
-              <td class="py-3 px-4">${summary.materias_sin_docente.length}</td>
+              <td class="py-3 px-4">${getSubjectsWithoutScheduleForSummary(summary).length}</td>
           </tr>
         `).join('');
       }
@@ -3052,29 +3056,30 @@
         return (dayBlocks.get(key) || []).length > 0;
       });
       const assignedTeacherId = state.rowTeachers.get(String(subject.id));
-      const isVacancy = Number(assignedTeacherId) === VACANCY_TEACHER_ID;
-      const hideVacancyBadge = isVacancy && state.vacancyVisualOverrides.has(Number(subject.id));
-      const hasRealTeacher = assignedTeacherId !== undefined && assignedTeacherId !== null && !isVacancy;
-      const hasTeacherAssignment = assignedTeacherId !== undefined && assignedTeacherId !== null;
+      const effectiveTeacherId = assignedTeacherId === undefined || assignedTeacherId === null
+        ? VACANCY_TEACHER_ID
+        : Number(assignedTeacherId);
+      const isVacancy = effectiveTeacherId === VACANCY_TEACHER_ID;
+      const hasRealTeacher = !isVacancy;
       const assignedTeacher = isVacancy
         ? { nombre: 'Vacante' }
-        : (assignedTeacherId
-            ? state.docentes.find(d => Number(d.id) === Number(assignedTeacherId))
+        : (effectiveTeacherId
+            ? state.docentes.find(d => Number(d.id) === Number(effectiveTeacherId))
             : null);
 
       const subjectCell = `
-        <td class="py-2 px-4 border-t align-top ${isVacancy && !hideVacancyBadge ? 'bg-red-50/70' : ''}">
-          <p class="font-medium text-sm ${isVacancy && !hideVacancyBadge ? 'text-red-700' : ''}">${isVacancy && !hideVacancyBadge ? '<i class="fas fa-triangle-exclamation mr-1" title="Materia en vacante"></i>' : ''}${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
+        <td class="py-2 px-4 border-t align-top ${isVacancy ? 'bg-red-50/70' : ''}">
+          <p class="font-medium text-sm ${isVacancy ? 'text-red-700' : ''}">${isVacancy ? '<i class="fas fa-triangle-exclamation mr-1" title="Materia en vacante"></i>' : ''}${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
           <p class="text-xs text-gray-500 mt-1">${isOptativa ? `Optativa · Etapa ${formatSubjectStage(subject.etapa)}` : 'Obligatoria'}</p>
           ${assignedTeacher
-            ? `<p class="text-xs ${isVacancy && !hideVacancyBadge ? 'text-red-700 font-semibold' : (isVacancy ? 'text-gray-400' : 'text-blue-700')} mt-1 truncate max-w-[180px]" title="${escapeHtml(assignedTeacher.nombre)}">${isVacancy ? (hideVacancyBadge ? 'Sin docente' : 'Vacante (sin docente)') : escapeHtml(assignedTeacher.nombre)}</p>`
+            ? `<p class="text-xs ${isVacancy ? 'text-red-700 font-semibold' : 'text-blue-700'} mt-1 truncate max-w-[180px]" title="${escapeHtml(assignedTeacher.nombre)}">${isVacancy ? 'Vacante (sin docente)' : escapeHtml(assignedTeacher.nombre)}</p>`
             : '<p class="text-xs text-gray-400 mt-1">Sin docente</p>'
           }
           <div class="flex flex-wrap gap-1 mt-1">
             <button type="button" class="row-assign-teacher-btn text-xs text-white bg-green-600 hover:bg-green-700 px-2 py-1 rounded" data-materia-id="${subject.id}">
               ${hasRealTeacher ? 'Cambiar docente' : 'Asignar docente'}
             </button>
-            ${hasTeacherAssignment
+            ${hasRealTeacher
               ? `<button type="button" class="row-remove-teacher-btn text-xs text-white bg-gray-500 hover:bg-gray-600 px-2 py-1 rounded" data-materia-id="${subject.id}">
                    Quitar docente
                  </button>`
@@ -3201,13 +3206,7 @@
         return;
       }
 
-      const keepAsBlank = window.confirm('¿Deseas dejar esta materia en blanco (Sin docente) para trabajarla después?\n\nAceptar: se mostrará Sin docente.\nCancelar: se mostrará como Vacante.');
-
-      if (keepAsBlank) {
-        state.vacancyVisualOverrides.add(mid);
-      } else {
-        state.vacancyVisualOverrides.delete(mid);
-      }
+      state.vacancyVisualOverrides.delete(mid);
 
       const blocks = getSubjectBlocksFromCurrentSchedule(mid);
       if (state.selectedGroupId && blocks.length) {
@@ -3223,42 +3222,39 @@
           return;
         }
 
-        showToast(keepAsBlank
-          ? 'Docente quitado correctamente. La materia se dejó en blanco para trabajarla después.'
-          : 'Docente quitado correctamente. Se asignó como vacante en los bloques existentes.', 'success');
+        showToast('Docente quitado correctamente. La materia quedó como vacante.', 'success');
         return;
       }
 
-      state.rowTeachers.delete(String(mid));
+      state.rowTeachers.set(String(mid), VACANCY_TEACHER_ID);
       renderSchedule();
-      showToast(keepAsBlank
-        ? 'Docente quitado correctamente. La materia se dejó en blanco para trabajarla después.'
-        : 'Docente quitado correctamente.', 'success');
+      showToast('Docente quitado correctamente. La materia quedó como vacante.', 'success');
     }
 
     function renderManualScheduleRow(row, dayBlocks, subjectCandidates) {
       const subject = subjectCandidates.find(item => Number(item.id) === Number(row.subjectId));
       const assignedTeacherId = subject ? state.rowTeachers.get(String(subject.id)) : null;
-      const isVacancy = Number(assignedTeacherId) === VACANCY_TEACHER_ID;
-      const hideVacancyBadge = isVacancy && subject && state.vacancyVisualOverrides.has(Number(subject.id));
-      const hasRealTeacher = assignedTeacherId !== undefined && assignedTeacherId !== null && !isVacancy;
-      const hasTeacherAssignment = assignedTeacherId !== undefined && assignedTeacherId !== null;
+      const effectiveTeacherId = !subject || assignedTeacherId === undefined || assignedTeacherId === null
+        ? VACANCY_TEACHER_ID
+        : Number(assignedTeacherId);
+      const isVacancy = effectiveTeacherId === VACANCY_TEACHER_ID;
+      const hasRealTeacher = !!subject && !isVacancy;
       const assignedTeacher = isVacancy
         ? { nombre: 'Vacante' }
-        : (assignedTeacherId
-            ? state.docentes.find(d => Number(d.id) === Number(assignedTeacherId))
+        : (effectiveTeacherId
+            ? state.docentes.find(d => Number(d.id) === Number(effectiveTeacherId))
             : null);
 
       const subjectCell = `
-        <td class="py-2 px-4 border-t align-top ${isVacancy && !hideVacancyBadge ? 'bg-red-50/70' : ''}">
+        <td class="py-2 px-4 border-t align-top ${isVacancy && subject ? 'bg-red-50/70' : ''}">
           ${subject
-            ? `<p class="font-medium text-sm ${isVacancy && !hideVacancyBadge ? 'text-red-700' : ''}">${isVacancy && !hideVacancyBadge ? '<i class="fas fa-triangle-exclamation mr-1" title="Materia en vacante"></i>' : ''}${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
+            ? `<p class="font-medium text-sm ${isVacancy ? 'text-red-700' : ''}">${isVacancy ? '<i class="fas fa-triangle-exclamation mr-1" title="Materia en vacante"></i>' : ''}${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
                <p class="text-xs text-gray-500 mt-1">${subject.tipo_materia === 'optativa' ? `Optativa · Etapa ${formatSubjectStage(subject.etapa)}` : 'Obligatoria'} · ${subject.semestre}° semestre</p>`
             : '<p class="font-medium text-sm text-gray-400 italic">Materia sin seleccionar</p><p class="text-xs text-gray-400 mt-1">Agrega la materia para habilitar los horarios</p>'
           }
           ${subject
             ? (assignedTeacher
-                ? `<p class="text-xs ${isVacancy && !hideVacancyBadge ? 'text-red-700 font-semibold' : (isVacancy ? 'text-gray-400' : 'text-blue-700')} mt-1 truncate max-w-[180px]" title="${escapeHtml(assignedTeacher.nombre)}">${isVacancy ? (hideVacancyBadge ? 'Sin docente' : 'Vacante (sin docente)') : escapeHtml(assignedTeacher.nombre)}</p>`
+                ? `<p class="text-xs ${isVacancy ? 'text-red-700 font-semibold' : 'text-blue-700'} mt-1 truncate max-w-[180px]" title="${escapeHtml(assignedTeacher.nombre)}">${isVacancy ? 'Vacante (sin docente)' : escapeHtml(assignedTeacher.nombre)}</p>`
                 : '<p class="text-xs text-gray-400 mt-1">Sin docente</p>')
             : ''
           }
@@ -3270,7 +3266,7 @@
               ? `<button type="button" class="row-assign-teacher-btn text-xs text-white bg-green-600 hover:bg-green-700 px-2 py-1 rounded" data-materia-id="${subject.id}">
                    ${hasRealTeacher ? 'Cambiar docente' : 'Asignar docente'}
                  </button>
-                 ${hasTeacherAssignment
+                 ${hasRealTeacher
                    ? `<button type="button" class="row-remove-teacher-btn text-xs text-white bg-gray-500 hover:bg-gray-600 px-2 py-1 rounded" data-materia-id="${subject.id}">
                         Quitar docente
                       </button>`
@@ -4433,10 +4429,12 @@
 
     function getMissingSubjectsRows() {
       return state.summaries.flatMap(summary =>
-        (summary.materias_sin_docente || []).map(materia => ({
-          grupo: summary.grupo,
-          materia,
-        }))
+        (summary.materias_sin_docente || [])
+          .filter(materia => !(summary.bloques_horario || []).some(block => Number(block.materia?.id) === Number(materia?.id)))
+          .map(materia => ({
+            grupo: summary.grupo,
+            materia,
+          }))
       );
     }
 
