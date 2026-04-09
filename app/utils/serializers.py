@@ -119,6 +119,7 @@ def serialize_schedule_observation(observation) -> dict:
         "grupo_id": observation.grupo_id,
         "materia_id": observation.materia_id,
         "comentario": observation.comentario,
+        "atendido": bool(getattr(observation, "atendido", False)),
         "created_at": observation.created_at.isoformat() if observation.created_at else None,
         "updated_at": observation.updated_at.isoformat() if observation.updated_at else None,
         "materia": serialize_subject(observation.materia, include_plan=False) if observation.materia else None,

@@ -137,17 +137,36 @@
     }
 
     .observation-attention-box {
-      background: #fff7d6;
-      border: 1px solid #f5d56a;
-      border-left: 4px solid #d97706;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-left: 4px solid #d1d5db;
       border-radius: 8px;
       padding: 8px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+      transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+
+    .observation-attention-box:hover {
+      box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+      border-color: #d1d5db;
+    }
+
+    .observation-attention-box--active {
+      background: #fff7ed;
+      border-color: #fdba74;
+      border-left-color: #ea580c;
+    }
+
+    .observation-attention-box--resolved {
+      background: #ecfdf3;
+      border-color: #86efac;
+      border-left-color: #16a34a;
     }
 
     .observation-attention-tag {
       display: inline-block;
-      background: #fde68a;
-      color: #92400e;
+      background: #f3f4f6;
+      color: #4b5563;
       border-radius: 9999px;
       padding: 2px 8px;
       font-size: 11px;
@@ -155,10 +174,20 @@
       letter-spacing: 0.01em;
     }
 
+    .observation-attention-tag--active {
+      background: #ffedd5;
+      color: #9a3412;
+    }
+
+    .observation-attention-tag--resolved {
+      background: #dcfce7;
+      color: #166534;
+    }
+
     .observation-attention-text {
       margin-top: 6px;
       font-size: 12px;
-      color: #78350f;
+      color: #374151;
       line-height: 1.35;
       white-space: pre-wrap;
       word-break: break-word;
@@ -612,14 +641,14 @@
                 </table>
               </div>
             </div>
-            <aside class="xl:col-span-2 bg-white rounded-lg shadow border border-amber-200 xl:max-w-[300px] xl:justify-self-end w-full">
-              <div class="p-4 border-b border-amber-100 bg-amber-50">
+            <aside id="schedule-observations-side-panel" class="xl:col-span-2 bg-white rounded-lg shadow border border-gray-200 xl:max-w-[300px] xl:justify-self-end w-full">
+              <div id="schedule-observations-side-header" class="p-4 border-b border-gray-200 bg-white">
                 <div class="flex items-center justify-between">
-                  <h3 class="text-sm font-bold text-amber-900">Observaciones</h3>
-                  <span id="schedule-observations-side-count" class="px-2 py-1 rounded-full bg-amber-200 text-amber-900 text-xs font-semibold">0</span>
+                  <h3 id="schedule-observations-side-title" class="text-sm font-bold text-gray-800">Observaciones</h3>
+                  <span id="schedule-observations-side-count" class="px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-semibold">0</span>
                 </div>
-                <p class="text-xs text-amber-800 mt-1">Seguimiento rápido al lado del horario.</p>
-                <button id="schedule-observations-side-add-btn" type="button" class="mt-2 text-xs text-white bg-amber-600 hover:bg-amber-700 px-2 py-1 rounded">
+                <p id="schedule-observations-side-note" class="text-xs text-gray-500 mt-1">Seguimiento rápido al lado del horario.</p>
+                <button id="schedule-observations-side-add-btn" type="button" class="mt-2 text-xs text-white bg-gray-700 hover:bg-gray-800 px-2 py-1 rounded">
                   Agregar mas
                 </button>
               </div>
@@ -2822,7 +2851,12 @@
     function renderScheduleObservationsAside() {
       const container = document.getElementById('schedule-observations-side-body');
       const count = document.getElementById('schedule-observations-side-count');
-      if (!container || !count) {
+      const panel = document.getElementById('schedule-observations-side-panel');
+      const header = document.getElementById('schedule-observations-side-header');
+      const title = document.getElementById('schedule-observations-side-title');
+      const note = document.getElementById('schedule-observations-side-note');
+      const addBtn = document.getElementById('schedule-observations-side-add-btn');
+      if (!container || !count || !panel || !header || !title || !note || !addBtn) {
         return;
       }
 
@@ -2833,6 +2867,26 @@
       });
 
       count.textContent = String(items.length);
+
+      const hasPending = items.some(item => !item.atendido);
+      panel.classList.toggle('border-amber-200', hasPending);
+      panel.classList.toggle('border-gray-200', !hasPending);
+      header.classList.toggle('bg-amber-50', hasPending);
+      header.classList.toggle('bg-white', !hasPending);
+      header.classList.toggle('border-amber-100', hasPending);
+      header.classList.toggle('border-gray-200', !hasPending);
+      title.classList.toggle('text-amber-900', hasPending);
+      title.classList.toggle('text-gray-800', !hasPending);
+      note.classList.toggle('text-amber-800', hasPending);
+      note.classList.toggle('text-gray-500', !hasPending);
+      count.classList.toggle('bg-amber-200', hasPending);
+      count.classList.toggle('text-amber-900', hasPending);
+      count.classList.toggle('bg-gray-100', !hasPending);
+      count.classList.toggle('text-gray-700', !hasPending);
+      addBtn.classList.toggle('bg-amber-600', hasPending);
+      addBtn.classList.toggle('hover:bg-amber-700', hasPending);
+      addBtn.classList.toggle('bg-gray-700', !hasPending);
+      addBtn.classList.toggle('hover:bg-gray-800', !hasPending);
 
       if (!state.selectedGroupSchedule) {
         container.innerHTML = '<p class="text-xs text-gray-400">Selecciona un grupo para ver observaciones.</p>';
@@ -2854,13 +2908,17 @@
         const materiaLabel = item.materia
           ? `${escapeHtml(item.materia.clave)} - ${escapeHtml(item.materia.nombre)}`
           : 'General del grupo';
+        const cardClass = item.atendido ? 'observation-attention-box--resolved' : 'observation-attention-box--active';
+        const tagClass = item.atendido ? 'observation-attention-tag--resolved' : 'observation-attention-tag--active';
+        const tagLabel = item.atendido ? 'Atendido' : 'Atender';
+        const metaTextClass = item.atendido ? 'text-emerald-800' : 'text-amber-900';
         return `
-          <article class="observation-attention-box">
+          <article class="observation-attention-box ${cardClass}">
             <div class="flex items-center justify-between gap-2">
-              <span class="observation-attention-tag">Atender</span>
-              <span class="text-[11px] text-amber-900">${escapeHtml(formatObservationDateTime(item.updated_at))}</span>
+              <span class="observation-attention-tag ${tagClass}">${tagLabel}</span>
+              <span class="text-[11px] ${metaTextClass}">${escapeHtml(formatObservationDateTime(item.updated_at))}</span>
             </div>
-            <p class="text-[11px] text-amber-900 font-semibold mt-1">${materiaLabel}</p>
+            <p class="text-[11px] ${metaTextClass} font-semibold mt-1">${materiaLabel}</p>
             <p class="observation-attention-text">${escapeHtml(item.comentario)}</p>
             <button type="button" class="mt-2 text-xs text-amber-900 hover:text-amber-700 font-semibold" onclick="openScheduleObservationsModal()">Ver</button>
           </article>
@@ -3540,17 +3598,25 @@
       }
 
       tbody.innerHTML = rows.map(item => {
+        const cardClass = item.atendido ? 'observation-attention-box--resolved' : 'observation-attention-box--active';
+        const tagClass = item.atendido ? 'observation-attention-tag--resolved' : 'observation-attention-tag--active';
+        const tagLabel = item.atendido ? 'Atendido' : 'Pendiente de atención';
+        const toggleLabel = item.atendido ? 'Marcar pendiente' : 'Marcar atendido';
+        const toggleClasses = item.atendido
+          ? 'text-emerald-700 hover:text-emerald-900'
+          : 'text-green-700 hover:text-green-900';
         return `
           <tr class="border-t">
             <td class="py-2 px-3 text-sm">General del grupo</td>
             <td class="py-2 px-3 text-sm">
-              <div class="observation-attention-box">
-                <span class="observation-attention-tag">Pendiente de atención</span>
+              <div class="observation-attention-box ${cardClass}">
+                <span class="observation-attention-tag ${tagClass}">${tagLabel}</span>
                 <p class="observation-attention-text">${escapeHtml(item.comentario)}</p>
               </div>
             </td>
             <td class="py-2 px-3 text-sm">${escapeHtml(formatObservationDateTime(item.updated_at))}</td>
             <td class="py-2 px-3 text-sm">
+              <button type="button" class="${toggleClasses} mr-3" onclick="window.toggleScheduleObservationStatus(${item.id}, ${item.atendido ? 'false' : 'true'})">${toggleLabel}</button>
               <button type="button" class="text-amber-700 hover:text-amber-900 mr-3" onclick="window.editScheduleObservation(${item.id})">Editar</button>
               <button type="button" class="text-red-600 hover:text-red-800" onclick="window.deleteScheduleObservation(${item.id})">Eliminar</button>
             </td>
@@ -3602,6 +3668,23 @@
         showToast('Observación eliminada correctamente.');
       } catch (error) {
         showToast(getErrorMessage(error, 'No fue posible eliminar la observación.'), 'error');
+      }
+    };
+
+    window.toggleScheduleObservationStatus = async function(observationId, atendido) {
+      try {
+        const response = await fetchApi(`/horarios/observaciones/${observationId}`, {
+          method: 'PATCH',
+          data: { atendido: Boolean(atendido) },
+        });
+        state.scheduleObservationEntries = state.scheduleObservationEntries.map(item => (
+          Number(item.id) === Number(response.data.id) ? response.data : item
+        ));
+        renderScheduleObservationsModal();
+        renderSchedule();
+        showToast(Boolean(atendido) ? 'Observación marcada como atendida.' : 'Observación marcada como pendiente.', 'success');
+      } catch (error) {
+        showToast(getErrorMessage(error, 'No fue posible actualizar el estado de la observación.'), 'error');
       }
     };
 

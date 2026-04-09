@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.extensions import db
+from sqlalchemy import text
 
 
 class HorarioObservacion(db.Model):
@@ -20,6 +21,7 @@ class HorarioObservacion(db.Model):
         index=True,
     )
     comentario = db.Column(db.Text, nullable=False)
+    atendido = db.Column(db.Boolean, nullable=False, default=False, server_default=text("0"))
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(
         db.DateTime,

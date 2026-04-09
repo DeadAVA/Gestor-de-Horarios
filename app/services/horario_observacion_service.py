@@ -1,4 +1,4 @@
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 
 from app.extensions import db
 from app.models import Grupo, HorarioObservacion
@@ -28,6 +28,7 @@ class HorarioObservacionService:
             grupo_id=group.id,
             materia_id=None,
             comentario=comentario,
+            atendido=HorarioObservacionService._parse_bool(payload.get("atendido"), default=False),
         )
         db.session.add(observation)
         db.session.commit()
@@ -42,6 +43,9 @@ class HorarioObservacionService:
 
         if "comentario" in payload:
             observation.comentario = HorarioObservacionService._validate_comment(payload.get("comentario"))
+
+        if "atendido" in payload:
+            observation.atendido = HorarioObservacionService._parse_bool(payload.get("atendido"), default=bool(observation.atendido))
 
         # Observaciones de horario son generales del grupo.
         observation.materia_id = None
@@ -67,10 +71,14 @@ class HorarioObservacionService:
             return
 
         inspector = inspect(db.engine)
-        if "horario_observaciones" in inspector.get_table_names():
+        if "horario_observaciones" not in inspector.get_table_names():
+            HorarioObservacion.__table__.create(bind=db.engine, checkfirst=True)
             return
 
-        HorarioObservacion.__table__.create(bind=db.engine, checkfirst=True)
+        columns = {column["name"] for column in inspector.get_columns("horario_observaciones")}
+        if "atendido" not in columns:
+            db.session.execute(text("ALTER TABLE horario_observaciones ADD COLUMN atendido BOOLEAN NOT NULL DEFAULT 0"))
+            db.session.commit()
 
     @staticmethod
     def _get_group_or_404(group_id: int) -> Grupo:
@@ -100,3 +108,19 @@ class HorarioObservacionService:
         if errors:
             raise ValidationApiError("Error de validacion al procesar observacion", errors)
         return comentario
+
+    @staticmethod
+    def _parse_bool(value, default: bool) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "t", "si", "sí", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+        raise ValidationApiError("Error de validacion al procesar observacion", ["atendido invalido"])
