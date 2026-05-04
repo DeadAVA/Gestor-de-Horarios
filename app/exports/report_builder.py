@@ -38,13 +38,15 @@ class ReportBuilder:
 
         rows = OrderedDict()
         for block in sorted_blocks:
-            row_key = (block.materia_id, block.docente_id)
+            teacher_code = block.docente.clave_docente if block.docente else "VACANTE-SISTEMA"
+            teacher_name = block.docente.nombre if block.docente else "Vacante"
+            row_key = (block.materia_id, block.docente_id or 0)
             if row_key not in rows:
                 rows[row_key] = {
                     "subject_code": block.materia.clave,
-                    "teacher_code": block.docente.clave_docente,
+                    "teacher_code": teacher_code,
                     "subject_name": block.materia.nombre,
-                    "teacher_name": block.docente.nombre,
+                    "teacher_name": teacher_name,
                     "edificio": "",
                     "salon": "0",
                     "capacidad": group.capacidad_alumnos,

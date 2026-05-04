@@ -2,13 +2,17 @@ from datetime import datetime, time
 
 from app.extensions import db
 from app.models import (
+    AsignacionMateriaGrupo,
     BloqueHorario,
     Docente,
     DocenteMateriaObservacion,
     Grupo,
+    HorarioJuez,
+    HorarioObservacion,
     Materia,
     PlanEstudio,
 )
+from app.services.vacancy_teacher import get_or_create_vacancy_teacher
 
 BACKUP_VERSION = "1.0"
 
@@ -23,6 +27,9 @@ class BackupService:
         grupos = Grupo.query.all()
         bloques = BloqueHorario.query.all()
         observaciones = DocenteMateriaObservacion.query.all()
+        horario_observaciones = HorarioObservacion.query.all()
+        horarios_juez = HorarioJuez.query.all()
+        asignaciones_materia = AsignacionMateriaGrupo.query.all()
 
         return {
             "version": BACKUP_VERSION,
@@ -72,6 +79,30 @@ class BackupService:
                     }
                     for o in observaciones
                 ],
+                "horario_observaciones": [
+                    {
+                        "id": ho.id, "grupo_id": ho.grupo_id, "materia_id": ho.materia_id,
+                        "comentario": ho.comentario, "atendido": ho.atendido,
+                        "created_at": ho.created_at.isoformat() if ho.created_at else None,
+                    }
+                    for ho in horario_observaciones
+                ],
+                "horarios_juez": [
+                    {
+                        "id": hj.id, "docente_id": hj.docente_id, "dia": hj.dia,
+                        "hora_inicio": hj.hora_inicio, "hora_fin": hj.hora_fin,
+                    }
+                    for hj in horarios_juez
+                ],
+                "asignaciones_materia": [
+                    {
+                        "id": a.id,
+                        "grupo_id": a.grupo_id,
+                        "materia_id": a.materia_id,
+                        "docente_id": a.docente_id,
+                    }
+                    for a in asignaciones_materia
+                ],
             },
         }
 
@@ -89,8 +120,11 @@ class BackupService:
             raise ValueError(f"Backup incompleto. Faltan secciones: {', '.join(sorted(missing))}")
 
         # Borrar en orden inverso a las FK para evitar violaciones de integridad
+        HorarioObservacion.query.delete()
+        AsignacionMateriaGrupo.query.delete()
         DocenteMateriaObservacion.query.delete()
         BloqueHorario.query.delete()
+        HorarioJuez.query.delete()
         Grupo.query.delete()
         Materia.query.delete()
         Docente.query.delete()
@@ -138,18 +172,84 @@ class BackupService:
         for b in tables["bloques_horario"]:
             hi = _parse_time(b["hora_inicio"])
             hf = _parse_time(b["hora_fin"])
+
+            # Compatibilidad: backups legacy pueden traer docente_id=0 o un id inexistente.
+            # En esos casos se conserva el bloque asignandolo al docente tecnico "Vacante".
+            raw_teacher_id = b.get("docente_id")
+            teacher_id = None
+            try:
+                teacher_id = int(raw_teacher_id)
+            except (TypeError, ValueError):
+                teacher_id = None
+
+            teacher_exists = (
+                teacher_id is not None
+                and teacher_id > 0
+                and db.session.get(Docente, teacher_id) is not None
+            )
+            if not teacher_exists:
+                teacher_id = get_or_create_vacancy_teacher().id
+
             db.session.add(BloqueHorario(
                 id=b["id"], grupo_id=b["grupo_id"], materia_id=b["materia_id"],
-                docente_id=b["docente_id"], dia=b["dia"],
+                docente_id=teacher_id, dia=b["dia"],
                 hora_inicio=hi, hora_fin=hf, modalidad=b["modalidad"],
             ))
         db.session.flush()
 
-        # Observaciones (opcionales — campo nuevo en v1.0)
+        # Observaciones docente-materia (opcionales — campo nuevo en v1.0)
         for o in tables.get("observaciones", []):
             db.session.add(DocenteMateriaObservacion(
                 id=o["id"], docente_id=o["docente_id"], materia_id=o["materia_id"],
                 observacion=o["observacion"], nivel=o.get("nivel", "malo"),
+            ))
+        db.session.flush()
+
+        # Horarios de juez (opcionales)
+        for hj in tables.get("horarios_juez", []):
+            db.session.add(HorarioJuez(
+                id=hj["id"], docente_id=hj["docente_id"], dia=hj["dia"],
+                hora_inicio=hj["hora_inicio"], hora_fin=hj["hora_fin"],
+            ))
+        db.session.flush()
+
+        # Observaciones de horario por grupo (opcionales)
+        for ho in tables.get("horario_observaciones", []):
+            created = None
+            if ho.get("created_at"):
+                try:
+                    from datetime import datetime as _dt
+                    created = _dt.fromisoformat(ho["created_at"])
+                except (ValueError, TypeError):
+                    pass
+            db.session.add(HorarioObservacion(
+                id=ho["id"], grupo_id=ho["grupo_id"], materia_id=ho.get("materia_id"),
+                comentario=ho["comentario"], atendido=ho.get("atendido", False),
+                created_at=created,
+            ))
+
+        # Asignaciones materia-docente por grupo (opcionales)
+        for a in tables.get("asignaciones_materia", []):
+            raw_teacher_id = a.get("docente_id")
+            teacher_id = None
+            try:
+                teacher_id = int(raw_teacher_id)
+            except (TypeError, ValueError):
+                teacher_id = None
+
+            teacher_exists = (
+                teacher_id is not None
+                and teacher_id > 0
+                and db.session.get(Docente, teacher_id) is not None
+            )
+            if not teacher_exists:
+                teacher_id = get_or_create_vacancy_teacher().id
+
+            db.session.add(AsignacionMateriaGrupo(
+                id=a["id"],
+                grupo_id=a["grupo_id"],
+                materia_id=a["materia_id"],
+                docente_id=teacher_id,
             ))
 
         db.session.commit()
@@ -161,6 +261,9 @@ class BackupService:
             "grupos": len(tables["grupos"]),
             "bloques_horario": len(tables["bloques_horario"]),
             "observaciones": len(tables.get("observaciones", [])),
+            "horarios_juez": len(tables.get("horarios_juez", [])),
+            "horario_observaciones": len(tables.get("horario_observaciones", [])),
+            "asignaciones_materia": len(tables.get("asignaciones_materia", [])),
         }
 
 

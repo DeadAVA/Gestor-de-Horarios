@@ -51,14 +51,50 @@ $pyInstallerArgs += 'portable_launcher.py'
 
 $portableOutputDir = Join-Path $projectRoot 'dist\HorariosUABCPortable'
 
-# Copiar la base de datos actual al paquete portable
+# Copiar la base de datos actual al paquete portable.
+# Usamos backup de SQLite para obtener un snapshot consistente incluso con WAL.
 $sourceDb = Join-Path $projectRoot 'instance\horarios.db'
 $destDb   = Join-Path $portableOutputDir 'instance\horarios.db'
 if (Test-Path $sourceDb) {
-    Copy-Item $sourceDb $destDb -Force
+    $destInstanceDir = Split-Path -Parent $destDb
+    if (-not (Test-Path $destInstanceDir)) {
+        New-Item -ItemType Directory -Path $destInstanceDir -Force | Out-Null
+    }
+
+    $backupCode = @"
+import sqlite3
+from pathlib import Path
+
+source_db = Path(r'''$sourceDb''')
+dest_db = Path(r'''$destDb''')
+
+if source_db.exists():
+    if dest_db.exists():
+        dest_db.unlink()
+
+    source_conn = sqlite3.connect(source_db)
+    try:
+        source_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        dest_conn = sqlite3.connect(dest_db)
+        try:
+            source_conn.backup(dest_conn)
+            dest_conn.commit()
+        finally:
+            dest_conn.close()
+    finally:
+        source_conn.close()
+"@
+    & $python -c $backupCode
     Write-Host "Base de datos copiada al paquete portable: $destDb"
 } else {
     Write-Warning "No se encontro instance\horarios.db en el proyecto; el ejecutable arrancara con DB vacia."
+}
+
+$sourceLocks = Join-Path $projectRoot 'instance\candados.json'
+$destLocks = Join-Path $portableOutputDir 'instance\candados.json'
+if (Test-Path $sourceLocks) {
+    Copy-Item $sourceLocks $destLocks -Force
+    Write-Host "Candados copiados al paquete portable: $destLocks"
 }
 
 # Crear launcher VBScript (sin ventana CMD)

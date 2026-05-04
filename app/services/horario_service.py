@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.extensions import db
-from app.models import BloqueHorario, Docente, Grupo, Materia
+from app.models import AsignacionMateriaGrupo, BloqueHorario, Docente, Grupo, Materia
 from app.services.candado_service import CandadoService
 from app.services.docente_service import MAX_TEACHER_HOURS
 from app.services.subject_selection import build_valid_subjects_query_for_group
@@ -18,6 +18,7 @@ class HorarioService:
         group = HorarioService._get_group_or_404(group_id)
         valid_subjects = HorarioService._get_valid_subjects_for_group(group)
         blocks = HorarioService._get_sorted_group_blocks(group.id)
+        assignments = HorarioService._get_group_subject_assignments(group.id)
 
         return {
             "grupo": serialize_group(group),
@@ -26,6 +27,15 @@ class HorarioService:
             "capacidad": group.capacidad_alumnos,
             "materias_disponibles": [serialize_subject(subject) for subject in valid_subjects],
             "bloques_horario": [serialize_block(block) for block in blocks],
+            "asignaciones_materia": [
+                {
+                    "id": assignment.id,
+                    "grupo_id": assignment.grupo_id,
+                    "materia": serialize_subject(assignment.materia, include_plan=False),
+                    "docente": serialize_teacher(assignment.docente, include_hours=False),
+                }
+                for assignment in assignments
+            ],
         }
 
     @staticmethod
@@ -42,6 +52,11 @@ class HorarioService:
             modalidad=validation_result["payload"]["modalidad"],
         )
         db.session.add(block)
+        HorarioService._upsert_subject_teacher_assignment(
+            group_id=validation_result["group"].id,
+            subject_id=validation_result["subject"].id,
+            teacher_id=validation_result["teacher"].id,
+        )
         db.session.commit()
         db.session.refresh(block)
         return serialize_block(block)
@@ -72,16 +87,35 @@ class HorarioService:
         block.hora_inicio = validation_result["payload"]["hora_inicio"]
         block.hora_fin = validation_result["payload"]["hora_fin"]
         block.modalidad = validation_result["payload"]["modalidad"]
+        HorarioService._upsert_subject_teacher_assignment(
+            group_id=validation_result["group"].id,
+            subject_id=validation_result["subject"].id,
+            teacher_id=validation_result["teacher"].id,
+        )
 
         db.session.commit()
         db.session.refresh(block)
         return serialize_block(block)
 
     @staticmethod
-    def reassign_subject_teacher(group_id: int, subject_id: int, teacher_id: int) -> dict:
+    def reassign_subject_teacher(group_id: int, subject_id: int, teacher_id: int | None) -> dict:
         group = HorarioService._get_group_or_404(group_id)
         subject = HorarioService._get_subject_or_404(subject_id)
         HorarioService._ensure_subject_matches_group(group, subject)
+
+        if teacher_id is None:
+            HorarioService._delete_subject_teacher_assignment(group.id, subject.id)
+            db.session.commit()
+            return {
+                "group_id": group.id,
+                "materia_id": subject.id,
+                "docente_id": None,
+                "updated_blocks": 0,
+                "bloques": [],
+            }
+
+        normalized_teacher_id = int(teacher_id)
+        teacher = HorarioService._resolve_teacher_for_assignment(normalized_teacher_id)
 
         blocks = db.session.scalars(
             select(BloqueHorario)
@@ -91,10 +125,12 @@ class HorarioService:
         ).all()
 
         if not blocks:
+            HorarioService._upsert_subject_teacher_assignment(group.id, subject.id, teacher.id)
+            db.session.commit()
             return {
                 "group_id": group.id,
                 "materia_id": subject.id,
-                "docente_id": int(teacher_id),
+                "docente_id": teacher.id,
                 "updated_blocks": 0,
                 "bloques": [],
             }
@@ -103,7 +139,7 @@ class HorarioService:
             payload = {
                 "group_id": group.id,
                 "materia_id": subject.id,
-                "docente_id": int(teacher_id),
+                "docente_id": teacher.id,
                 "dia": block.dia,
                 "hora_inicio": format_time_value(block.hora_inicio),
                 "hora_fin": format_time_value(block.hora_fin),
@@ -119,6 +155,8 @@ class HorarioService:
             block.docente_id = validation_result["teacher"].id
             db.session.flush()
 
+        HorarioService._upsert_subject_teacher_assignment(group.id, subject.id, teacher.id)
+
         db.session.commit()
 
         refreshed_blocks = HorarioService._get_sorted_group_blocks(group.id)
@@ -126,7 +164,7 @@ class HorarioService:
         return {
             "group_id": group.id,
             "materia_id": subject.id,
-            "docente_id": int(teacher_id),
+            "docente_id": teacher.id,
             "updated_blocks": len(affected_blocks),
             "bloques": [serialize_block(block) for block in affected_blocks],
         }
@@ -169,23 +207,22 @@ class HorarioService:
         if not judge_assignment:
             HorarioService._ensure_not_locked_by_candado(cleaned_payload)
 
-        if not vacancy_assignment:
-            conflicting_group_block = HorarioService._find_group_overlap(
-                group.id,
-                cleaned_payload["dia"],
-                cleaned_payload["hora_inicio"],
-                cleaned_payload["hora_fin"],
-                exclude_block_id=exclude_block_id,
+        conflicting_group_block = HorarioService._find_group_overlap(
+            group.id,
+            cleaned_payload["dia"],
+            cleaned_payload["hora_inicio"],
+            cleaned_payload["hora_fin"],
+            exclude_block_id=exclude_block_id,
+        )
+        if conflicting_group_block is not None:
+            raise ConflictApiError(
+                f"Conflicto con {conflicting_group_block.materia.nombre} - Prof. {conflicting_group_block.docente.nombre}",
+                [
+                    f"El grupo {group.numero_grupo} ya tiene un bloque traslapado en ese horario",
+                    f"Bloque en conflicto: grupo {conflicting_group_block.grupo.numero_grupo}",
+                    f"Horario en conflicto: {HorarioService._format_schedule_range(conflicting_group_block)}",
+                ],
             )
-            if conflicting_group_block is not None:
-                raise ConflictApiError(
-                    f"Conflicto con {conflicting_group_block.materia.nombre} - Prof. {conflicting_group_block.docente.nombre}",
-                    [
-                        f"El grupo {group.numero_grupo} ya tiene un bloque traslapado en ese horario",
-                        f"Bloque en conflicto: grupo {conflicting_group_block.grupo.numero_grupo}",
-                        f"Horario en conflicto: {HorarioService._format_schedule_range(conflicting_group_block)}",
-                    ],
-                )
 
         if not vacancy_assignment:
             conflicting_teacher_block = HorarioService._find_teacher_overlap(
@@ -409,6 +446,43 @@ class HorarioService:
             select(BloqueHorario).where(BloqueHorario.grupo_id == group_id)
         ).all()
         return sorted(blocks, key=lambda block: (day_sort_key(block.dia), block.hora_inicio, block.hora_fin))
+
+    @staticmethod
+    def _get_group_subject_assignments(group_id: int) -> list[AsignacionMateriaGrupo]:
+        return db.session.scalars(
+            select(AsignacionMateriaGrupo)
+            .where(AsignacionMateriaGrupo.grupo_id == group_id)
+            .order_by(AsignacionMateriaGrupo.id.asc())
+        ).all()
+
+    @staticmethod
+    def _upsert_subject_teacher_assignment(group_id: int, subject_id: int, teacher_id: int) -> None:
+        assignment = db.session.scalar(
+            select(AsignacionMateriaGrupo)
+            .where(AsignacionMateriaGrupo.grupo_id == group_id)
+            .where(AsignacionMateriaGrupo.materia_id == subject_id)
+            .limit(1)
+        )
+        if assignment is None:
+            db.session.add(AsignacionMateriaGrupo(
+                grupo_id=group_id,
+                materia_id=subject_id,
+                docente_id=teacher_id,
+            ))
+            return
+
+        assignment.docente_id = teacher_id
+
+    @staticmethod
+    def _delete_subject_teacher_assignment(group_id: int, subject_id: int) -> None:
+        assignment = db.session.scalar(
+            select(AsignacionMateriaGrupo)
+            .where(AsignacionMateriaGrupo.grupo_id == group_id)
+            .where(AsignacionMateriaGrupo.materia_id == subject_id)
+            .limit(1)
+        )
+        if assignment is not None:
+            db.session.delete(assignment)
 
     @staticmethod
     def _format_schedule_range(block: BloqueHorario) -> str:

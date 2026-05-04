@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.api import register_blueprints
 from app.config import config_by_name
+from app.config import INSTANCE_DIR
 from app.config import RESOURCE_BASE_DIR
 from app.extensions import init_extensions
 from app.seeds.initial_seed import register_seed_commands
@@ -16,6 +17,7 @@ def create_app(config_name: str = "default") -> Flask:
 
     flask_kwargs = {
         "instance_relative_config": True,
+        "instance_path": str(INSTANCE_DIR),
         "template_folder": str(templates_dir),
     }
     if static_dir.exists():

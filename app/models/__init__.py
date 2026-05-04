@@ -1,3 +1,4 @@
+from app.models.asignacion_materia import AsignacionMateriaGrupo
 from app.models.bloque_horario import BloqueHorario
 from app.models.docente import Docente
 from app.models.grupo import Grupo
@@ -13,6 +14,7 @@ __all__ = [
     "Grupo",
     "Materia",
     "Docente",
+    "AsignacionMateriaGrupo",
     "BloqueHorario",
     "DocenteMateriaObservacion",
     "HorarioJuez",
