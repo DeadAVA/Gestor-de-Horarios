@@ -88,6 +88,16 @@ class ExportService:
                 mimetype="application/pdf",
             )
 
+        if format_name == "word":
+            group_ids = [group.id for group in groups]
+            merged_word = WordExporter.export_all_schedules(group_ids)
+            return send_file(
+                merged_word,
+                as_attachment=True,
+                download_name=f"horarios_todos_{_group_type_suffix(groups)}.docx",
+                mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+
         buffer = BytesIO()
         with ZipFile(buffer, "w", ZIP_DEFLATED) as zip_file:
             for group in groups:

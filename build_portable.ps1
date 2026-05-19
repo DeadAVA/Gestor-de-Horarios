@@ -9,7 +9,25 @@ if (-not (Test-Path $python)) {
 }
 
 & $python -m pip install --upgrade pip
-& $python -m pip install pyinstaller waitress
+# PyInstaller 5.13.2 es la ultima version compatible con Python 3.10.0
+# (6.x tiene un bug en dis.py con Python 3.10.0 que causa IndexError)
+& $python -m pip install "pyinstaller==5.13.2" waitress --quiet
+
+# Parche para Python 3.10.0: dis.get_instructions tiene un bug que causa
+# IndexError al analizar ciertos bytecodes. Se parchea util.py de PyInstaller.
+$utilPyPath = Join-Path $projectRoot '.venv\lib\site-packages\PyInstaller\lib\modulegraph\util.py'
+if (Test-Path $utilPyPath) {
+    $utilContent = Get-Content $utilPyPath -Raw
+    $oldLine = 'yield from (i for i in get_instructions(code_object) if i.opname != "EXTENDED_ARG")'
+    $newLines = "    # Python 3.10.0 bug: dis.get_instructions puede lanzar IndexError en ciertos bytecodes`n    try:`n        yield from (i for i in get_instructions(code_object) if i.opname != `"EXTENDED_ARG`")`n    except IndexError:`n        pass"
+    if ($utilContent -notmatch [regex]::Escape("except IndexError")) {
+        $utilContent = $utilContent -replace [regex]::Escape("    $oldLine"), $newLines
+        Set-Content $utilPyPath $utilContent -NoNewline
+        Write-Host "Parche aplicado a PyInstaller util.py (fix Python 3.10.0 dis bug)"
+    } else {
+        Write-Host "Parche de PyInstaller util.py ya aplicado."
+    }
+}
 
 $distDir = Join-Path $projectRoot 'dist'
 $buildDir = Join-Path $projectRoot 'build'
@@ -31,21 +49,17 @@ foreach ($candidate in $iconCandidates) {
 
 $pyInstallerArgs = @(
     '--noconfirm',
-    '--clean',
-    '--name', 'HorariosUABCPortable',
-    '--onedir',
-    '--add-data', 'app\templates;app\templates',
-    '--add-data', 'app\assets;app\assets'
+    '--clean'
 )
 
 if ($iconPath) {
-    $pyInstallerArgs += @('--icon', $iconPath)
     Write-Host "Usando icono: $iconPath"
 } else {
     Write-Warning 'No se encontro app_ico.ico ni app_icon.ico; se generara sin icono personalizado.'
 }
 
-$pyInstallerArgs += 'portable_launcher.py'
+# Usar el .spec para mayor control sobre hidden imports y configuracion
+$pyInstallerArgs += 'HorariosUABCPortable.spec'
 
 & $python -m PyInstaller @pyInstallerArgs
 

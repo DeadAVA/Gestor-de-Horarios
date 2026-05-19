@@ -27,6 +27,22 @@ class WordExporter:
         return output
 
     @staticmethod
+    def export_all_schedules(group_ids: list[int]) -> BytesIO:
+        document = Document()
+        WordExporter._configure_document(document)
+        for index, group_id in enumerate(group_ids):
+            if index > 0:
+                document.add_page_break()
+            context = ReportBuilder.build_group_report_context(group_id)
+            WordExporter._render_header(document, context)
+            WordExporter._render_table(document, context)
+
+        output = BytesIO()
+        document.save(output)
+        output.seek(0)
+        return output
+
+    @staticmethod
     def _configure_document(document: Document) -> None:
         section = document.sections[0]
         section.orientation = WD_ORIENT.LANDSCAPE

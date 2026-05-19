@@ -681,6 +681,8 @@
               <div id="schedule-observations-side-body" class="p-3 space-y-2 max-h-[70vh] overflow-y-auto"></div>
             </aside>
           </div>
+
+          <div id="schedule-all-groups-preview" class="mt-8 space-y-8"></div>
         </div>
 
         <!-- Exportar View -->
@@ -2851,6 +2853,100 @@
       };
     }
 
+    function getSubjectRequiredScheduleHours(subject) {
+      if (!subject) {
+        return 0;
+      }
+      return Number(subject.hc || 0) + Number(subject.ht || 0);
+    }
+
+    function getBlockDurationHours(block) {
+      const startHour = Number(String(block?.hora_inicio || '00:00').split(':')[0]);
+      const rawEnd = String(block?.hora_fin || '00:00');
+      const endHour = rawEnd.startsWith('24:') ? 24 : Number(rawEnd.split(':')[0]);
+      return Math.max(0, endHour - startHour);
+    }
+
+    function getSubjectScheduledHours(subjectId, options = {}) {
+      const excludeBlockId = Number(options.excludeBlockId || 0);
+      const blocks = state.selectedGroupSchedule?.bloques_horario || [];
+      let total = blocks.reduce((sum, block) => {
+        if (Number(block.materia?.id) !== Number(subjectId)) {
+          return sum;
+        }
+        if (excludeBlockId && Number(block.id) === excludeBlockId) {
+          return sum;
+        }
+        return sum + getBlockDurationHours(block);
+      }, 0);
+
+      if (options.extraBlock) {
+        total += getBlockDurationHours(options.extraBlock);
+      }
+
+      return total;
+    }
+
+    function getSubjectHourStatus(subjectId, options = {}) {
+      const subjects = state.selectedGroupDetail?.materias_disponibles || [];
+      const subject = subjects.find(item => Number(item.id) === Number(subjectId))
+        || state.materias.find(item => Number(item.id) === Number(subjectId));
+      const required = getSubjectRequiredScheduleHours(subject);
+      const assigned = getSubjectScheduledHours(subjectId, options);
+      return {
+        subject,
+        required,
+        assigned,
+        missing: Math.max(0, required - assigned),
+        excess: Math.max(0, assigned - required),
+        complete: required > 0 && assigned === required,
+      };
+    }
+
+    function pruneInvalidConfirmedSubjects(groupId) {
+      if (!state.confirmedSubjects.size) {
+        return;
+      }
+
+      let changed = false;
+      [...state.confirmedSubjects.entries()].forEach(([subjectId, confirmed]) => {
+        if (!confirmed) {
+          return;
+        }
+        const status = getSubjectHourStatus(subjectId);
+        if (status.required > 0 && status.assigned !== status.required) {
+          state.confirmedSubjects.delete(subjectId);
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        saveConfirmedToStorage(groupId);
+      }
+    }
+
+    function syncSubjectConfirmationByHours(subjectId, groupId = state.selectedGroupId) {
+      if (!subjectId || !groupId) {
+        return false;
+      }
+
+      const status = getSubjectHourStatus(subjectId);
+      const mid = String(subjectId);
+      const wasConfirmed = !!state.confirmedSubjects.get(mid);
+
+      if (status.required > 0 && status.assigned === status.required) {
+        state.confirmedSubjects.set(mid, true);
+        saveConfirmedToStorage(groupId);
+        return !wasConfirmed;
+      }
+
+      if (wasConfirmed) {
+        state.confirmedSubjects.delete(mid);
+        saveConfirmedToStorage(groupId);
+      }
+      return false;
+    }
+
     function getCurrentGroupSemesterSubjects() {
       const detail = state.selectedGroupDetail || {};
       const group = detail.grupo || state.selectedGroupSchedule?.grupo;
@@ -3416,6 +3512,160 @@
       return `<tr class="${isConfirmed ? 'schedule-row-confirmed' : ''}">${subjectCell}${dayCells}</tr>`;
     }
 
+    function getSchedulePreviewSubjects(summary) {
+      const subjectsById = new Map();
+      (summary?.bloques_horario || []).forEach(block => {
+        if (block?.materia?.id) {
+          subjectsById.set(Number(block.materia.id), block.materia);
+        }
+      });
+      (summary?.materias_sin_docente || []).forEach(subject => {
+        if (subject?.id) {
+          subjectsById.set(Number(subject.id), subject);
+        }
+      });
+
+      return [...subjectsById.values()].sort((a, b) => (
+        `${Number(a.semestre || 0)} ${a.tipo_materia || ''} ${a.clave || ''} ${a.nombre || ''}`
+          .localeCompare(`${Number(b.semestre || 0)} ${b.tipo_materia || ''} ${b.clave || ''} ${b.nombre || ''}`)
+      ));
+    }
+
+    function renderSchedulePreviewRows(summary) {
+      const blocks = summary?.bloques_horario || [];
+      const subjects = getSchedulePreviewSubjects(summary);
+
+      if (!subjects.length) {
+        return `
+          <tr class="border-t">
+            <td colspan="7" class="py-4 px-4 text-center text-gray-500">No hay materias ni bloques registrados para este grupo.</td>
+          </tr>
+        `;
+      }
+
+      const dayBlocks = buildSubjectDayBlocksMap(blocks);
+
+      return subjects.map(subject => {
+        const subjectBlocks = blocks.filter(block => Number(block.materia?.id) === Number(subject.id));
+        const teacher = subjectBlocks.find(block => block.docente)?.docente;
+        const teacherLabel = teacher
+          ? (teacher.clave_docente === 'VACANTE-SISTEMA' ? 'Vacante (sin docente)' : teacher.nombre)
+          : 'Sin horario capturado';
+        const isVacancy = teacher?.clave_docente === 'VACANTE-SISTEMA' || !subjectBlocks.length;
+        const subjectCell = `
+          <td class="py-2 px-4 border-t align-top ${isVacancy ? 'bg-red-50/60' : ''}">
+            <p class="font-medium text-sm ${isVacancy ? 'text-red-700' : 'text-gray-800'}">${escapeHtml(subject.clave)} - ${escapeHtml(subject.nombre)}</p>
+            <p class="text-xs text-gray-500 mt-1">${subject.tipo_materia === 'optativa' ? `Optativa &middot; Etapa ${formatSubjectStage(subject.etapa)}` : 'Obligatoria'}</p>
+            <p class="text-xs ${isVacancy ? 'text-red-700 font-semibold' : 'text-blue-700'} mt-1 truncate max-w-[220px]" title="${escapeHtml(teacherLabel)}">${escapeHtml(teacherLabel)}</p>
+          </td>
+        `;
+
+        const dayCells = DAYS.map(day => {
+          const key = `${subject.id}:${day}`;
+          const dayEntries = dayBlocks.get(key) || [];
+          const blocksHtml = dayEntries.map(block => `
+            <button type="button" class="schedule-preview-block w-full text-left min-h-[64px] p-2 rounded ${getBlockColor(block.modalidad)} cursor-pointer" data-group-id="${summary.grupo.id}">
+              <p class="text-[11px] font-semibold text-gray-700">${escapeHtml(formatScheduleSlotLabel(block).inicio)} - ${escapeHtml(formatScheduleSlotLabel(block).fin)}</p>
+              <p class="text-[11px] text-gray-700 mt-1 truncate">${escapeHtml(block.docente?.nombre || 'Sin docente')}</p>
+            </button>
+          `).join('');
+
+          return `
+            <td class="border p-1 align-top min-w-36">
+              <div class="${dayEntries.length > 1 ? 'space-y-1' : ''}">
+                ${blocksHtml || '<div class="text-center text-xs text-gray-300 py-3">-</div>'}
+              </div>
+            </td>
+          `;
+        }).join('');
+
+        return `<tr>${subjectCell}${dayCells}</tr>`;
+      }).join('');
+    }
+
+    function renderAllSchedulePreviews() {
+      const container = document.getElementById('schedule-all-groups-preview');
+      if (!container) {
+        return;
+      }
+
+      if (!state.grupos.length) {
+        container.innerHTML = '';
+        return;
+      }
+
+      const summariesByGroupId = new Map(
+        state.summaries.map(summary => [Number(summary?.grupo?.id), summary])
+      );
+
+      container.innerHTML = state.grupos.map(group => {
+        const summary = summariesByGroupId.get(Number(group.id)) || { grupo: group, bloques_horario: [], materias_sin_docente: [] };
+        const planClave = summary.plan_estudio?.clave || group.plan_estudio?.clave || '';
+        const isSelected = Number(state.selectedGroupId) === Number(group.id);
+        return `
+          <section id="schedule-group-${group.id}" class="schedule-group-page min-h-[calc(100vh-8rem)] bg-white rounded-lg shadow overflow-hidden border ${isSelected ? 'border-green-400 ring-2 ring-green-100' : 'border-gray-200'} scroll-mt-24">
+            <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-gray-50 border-b">
+              <div>
+                <h3 class="text-lg font-bold text-gray-800">${escapeHtml(getGroupDisplayName(group))} &middot; ${group.semestre}&deg; semestre</h3>
+                <p class="text-xs text-gray-500">Plan ${escapeHtml(displayPlanKey(planClave))} &middot; ${escapeHtml(formatGroupType(getGroupModality(group)))}</p>
+              </div>
+              <button type="button" class="schedule-preview-open-btn px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm" data-group-id="${group.id}">
+                Abrir este grupo
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full">
+                <thead>
+                  <tr class="bg-white">
+                    <th class="py-3 px-4 text-left min-w-72">Materia del semestre</th>
+                    <th class="py-3 px-4 text-left">Lunes</th>
+                    <th class="py-3 px-4 text-left">Martes</th>
+                    <th class="py-3 px-4 text-left">Mi&eacute;rcoles</th>
+                    <th class="py-3 px-4 text-left">Jueves</th>
+                    <th class="py-3 px-4 text-left">Viernes</th>
+                    <th class="py-3 px-4 text-left">S&aacute;bado</th>
+                  </tr>
+                </thead>
+                <tbody>${renderSchedulePreviewRows(summary)}</tbody>
+              </table>
+            </div>
+          </section>
+        `;
+      }).join('');
+
+      document.querySelectorAll('.schedule-preview-open-btn, .schedule-preview-block').forEach(element => {
+        element.addEventListener('click', async () => {
+          await selectScheduleGroupFromPreview(Number(element.getAttribute('data-group-id')));
+        });
+      });
+    }
+
+    function scrollToScheduleGroup(groupId) {
+      const target = document.getElementById(`schedule-group-${groupId}`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    function scrollToScheduleEditor() {
+      const target = document.getElementById('schedule-title');
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    async function selectScheduleGroupFromPreview(groupId) {
+      if (!groupId) {
+        return;
+      }
+
+      try {
+        await loadGroupContext(groupId, { scrollToEditor: true });
+      } catch (error) {
+        showToast(getErrorMessage(error, 'No fue posible cargar el grupo.'), 'error');
+      }
+    }
+
     function renderSchedule() {
       const title = document.getElementById('schedule-title');
       const currentPlan = document.getElementById('current-plan');
@@ -3428,6 +3678,7 @@
         addRowBtn.classList.add('hidden');
         renderEmptyState('schedule-grid-body', 7, 'Selecciona un grupo para ver su horario.');
         renderScheduleObservationsAside();
+        renderAllSchedulePreviews();
         return;
       }
 
@@ -3447,6 +3698,7 @@
 
       // Cargar confirmaciones de localStorage para este grupo.
       loadConfirmedFromStorage(group.id);
+      pruneInvalidConfirmedSubjects(group.id);
 
       // Init rowTeachers desde asignaciones persistidas por grupo.
       persistedAssignments.forEach(assignment => {
@@ -3476,12 +3728,14 @@
         if (!state.customScheduleRows.length) {
           renderEmptyState('schedule-grid-body', 7, 'No hay renglones capturados para este grupo.');
           renderScheduleObservationsAside();
+          renderAllSchedulePreviews();
           return;
         }
 
         tbody.innerHTML = state.customScheduleRows.map(row => renderManualScheduleRow(row, dayBlocks, allSubjects)).join('');
         bindScheduleCellEvents();
         renderScheduleObservationsAside();
+        renderAllSchedulePreviews();
         return;
       }
 
@@ -3534,6 +3788,7 @@
       if (!obligatoriasSubjects.length && !totalSlots) {
         renderEmptyState('schedule-grid-body', 7, 'No hay materias registradas para este semestre.');
         renderScheduleObservationsAside();
+        renderAllSchedulePreviews();
         return;
       }
 
@@ -3554,6 +3809,7 @@
       ].join('');
       bindScheduleCellEvents();
       renderScheduleObservationsAside();
+      renderAllSchedulePreviews();
     }
 
     function setScheduleSubject(subjectId) {
@@ -4224,6 +4480,35 @@
       if (!subjectId || !state.selectedGroupId) return;
       const mid = String(subjectId);
       const next = !state.confirmedSubjects.get(mid);
+
+      if (next) {
+        const status = getSubjectHourStatus(subjectId);
+        const subjectLabel = status.subject
+          ? `${status.subject.clave} - ${status.subject.nombre}`
+          : 'La materia seleccionada';
+
+        if (status.required <= 0) {
+          showToast(`${subjectLabel} no tiene HC + HT capturadas para validar horas.`, 'warning');
+          return;
+        }
+
+        if (status.assigned < status.required) {
+          showToast(
+            `${subjectLabel}: te faltan ${status.missing} hora(s). Tiene ${status.assigned} de ${status.required}.`,
+            'warning',
+          );
+          return;
+        }
+
+        if (status.assigned > status.required) {
+          showToast(
+            `${subjectLabel}: tiene ${status.excess} hora(s) de mas. Debe quedar exactamente en ${status.required}.`,
+            'error',
+          );
+          return;
+        }
+      }
+
       state.confirmedSubjects.set(mid, next);
       saveConfirmedToStorage(state.selectedGroupId);
       renderSchedule();
@@ -4352,6 +4637,11 @@
 
       renderGroupSelector();
       renderSchedule();
+      if (options.scrollToGroup) {
+        requestAnimationFrame(() => scrollToScheduleGroup(groupId));
+      } else if (options.scrollToEditor) {
+        requestAnimationFrame(() => scrollToScheduleEditor());
+      }
     }
 
     async function refreshAll(options = {}) {
@@ -5311,6 +5601,18 @@
         modalidad: MODALITY_MAP[document.getElementById('virtual').value],
       };
 
+      const hourStatus = getSubjectHourStatus(Number(materia), {
+        excludeBlockId: isEditing ? state.editingScheduleBlockId : null,
+        extraBlock: payload,
+      });
+      if (hourStatus.required > 0 && hourStatus.assigned > hourStatus.required) {
+        showToast(
+          `No puedes pasar de ${hourStatus.required} hora(s) para esta materia. Con este bloque quedaria con ${hourStatus.assigned}, ${hourStatus.excess} de mas.`,
+          'error',
+        );
+        return;
+      }
+
       // Si es edición y el docente es juez, mostrar aviso antes de guardar
       if (isEditing) {
         const teacher = state.docentes.find(d => Number(d.id) === Number(docente));
@@ -5335,7 +5637,13 @@
         document.getElementById('add-schedule-modal').classList.add('hidden');
         resetScheduleModal();
         await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
-        showToast(isEditing ? 'Bloque de horario actualizado correctamente.' : 'Bloque de horario creado correctamente.');
+        const autoConfirmed = syncSubjectConfirmationByHours(payload.materia_id);
+        renderSchedule();
+        showToast(
+          autoConfirmed
+            ? 'Bloque guardado y materia confirmada automaticamente.'
+            : (isEditing ? 'Bloque de horario actualizado correctamente.' : 'Bloque de horario creado correctamente.'),
+        );
       } catch (error) {
         showToast(getErrorMessage(error, isEditing ? 'No fue posible actualizar el horario.' : 'No fue posible guardar el horario.'), 'error');
       }
@@ -5394,6 +5702,7 @@
       if (!state.editingScheduleBlockId) {
         return;
       }
+      const deletedSubjectId = Number(document.getElementById('schedule-materia-id').value || 0);
 
       const confirmation = window.confirm('¿Seguro que deseas eliminar este bloque de horario?');
       if (!confirmation) {
@@ -5405,6 +5714,8 @@
         document.getElementById('add-schedule-modal').classList.add('hidden');
         resetScheduleModal();
         await refreshCurrentGroupAfterSchedule({ preserveDraftSchedule: true });
+        syncSubjectConfirmationByHours(deletedSubjectId);
+        renderSchedule();
         showToast('Bloque eliminado correctamente.');
       } catch (error) {
         showToast(getErrorMessage(error, 'No fue posible eliminar el bloque.'), 'error');
@@ -5670,7 +5981,7 @@
       }
 
       try {
-        await loadGroupContext(this.value);
+        await loadGroupContext(this.value, { scrollToGroup: true });
         showToast(`Grupo ${this.options[this.selectedIndex].text} seleccionado.`, 'info', {
           gravity: 'bottom',
           position: 'left',

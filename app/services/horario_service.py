@@ -255,6 +255,12 @@ class HorarioService:
             cleaned_payload["hora_inicio"],
             cleaned_payload["hora_fin"],
         )
+        HorarioService._ensure_subject_hours_not_exceeded(
+            group.id,
+            subject,
+            assignment_hours,
+            exclude_block_id=exclude_block_id,
+        )
 
         if not vacancy_assignment:
             teacher_blocks = teacher.bloques_horario
@@ -285,6 +291,43 @@ class HorarioService:
             "teacher_current_hours": teacher_current_hours,
             "assignment_hours": assignment_hours,
         }
+
+    @staticmethod
+    def _ensure_subject_hours_not_exceeded(
+        group_id: int,
+        subject: Materia,
+        assignment_hours: float,
+        exclude_block_id: int | None = None,
+    ) -> None:
+        required_hours = int(subject.hc or 0) + int(subject.ht or 0)
+        if required_hours <= 0:
+            return
+
+        query = (
+            select(BloqueHorario)
+            .where(BloqueHorario.grupo_id == group_id)
+            .where(BloqueHorario.materia_id == subject.id)
+        )
+        if exclude_block_id is not None:
+            query = query.where(BloqueHorario.id != exclude_block_id)
+
+        current_hours = calculate_hours_from_blocks(db.session.scalars(query).all())
+        resulting_hours = round(current_hours + assignment_hours, 2)
+
+        if resulting_hours <= required_hours:
+            return
+
+        excess_hours = round(resulting_hours - required_hours, 2)
+        raise ConflictApiError(
+            "La materia excede sus horas requeridas",
+            [
+                (
+                    f"{subject.clave} - {subject.nombre} requiere {required_hours} horas "
+                    f"(HC + HT). Ya tiene {current_hours} y este bloque suma {assignment_hours}; "
+                    f"te pasas por {excess_hours} horas."
+                ),
+            ],
+        )
 
     @staticmethod
     def _ensure_not_locked_by_candado(cleaned_payload: dict) -> None:
